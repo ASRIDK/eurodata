@@ -28,3 +28,24 @@ def test_catalog_covers_four_domains():
     assert names == {"Demographics", "Economy", "Digital & Connectivity", "Energy & Green"}
     assert any(s["name"] == "Eurostat" and s["redistributable"] for s in SOURCES)
     assert all("domain" in ind and "api_code" in ind for ind in INDICATORS)
+
+
+import duckdb
+from eurodata.db import init_schema
+from eurodata.model.seed import seed_all
+
+
+def test_seed_all_populates_tables():
+    con = duckdb.connect(":memory:")
+    for seq in ["seq_statistic", "seq_edge", "seq_snapshot", "seq_run"]:
+        con.execute(f"CREATE SEQUENCE IF NOT EXISTS {seq} START 1")
+    init_schema(con)
+    seed_all(con)
+    assert con.execute("SELECT COUNT(*) FROM geography").fetchone()[0] >= 40
+    assert con.execute("SELECT COUNT(*) FROM bloc").fetchone()[0] == 5
+    assert con.execute("SELECT COUNT(*) FROM domain").fetchone()[0] == 4
+    assert con.execute("SELECT COUNT(*) FROM indicator").fetchone()[0] == 10
+    assert con.execute("SELECT COUNT(*) FROM source").fetchone()[0] == 4
+    # idempotent
+    seed_all(con)
+    assert con.execute("SELECT COUNT(*) FROM domain").fetchone()[0] == 4
