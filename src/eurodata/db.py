@@ -1,4 +1,5 @@
 from importlib import resources
+from pathlib import Path
 
 import duckdb
 
@@ -16,6 +17,7 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
 
 def connect(path: str | None = None) -> duckdb.DuckDBPyConnection:
     db_path = path or get_settings().duckdb_path
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(db_path)
     init_schema(con)
     return con
