@@ -13,3 +13,7 @@ venv/
 data/raw/
 data/*.duckdb
 data/releases/
+
+# Editor / tooling noise
+.DS_Store
+.omc/
