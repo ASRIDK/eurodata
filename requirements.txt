@@ -1,7 +1,7 @@
 duckdb>=1.1.0
 pandas>=2.2.0
 pyarrow>=17.0.0
-pandasdmx>=1.11.0
+sdmx1>=2.13  # successor to pandasdmx; imported as `import sdmx`. pandasdmx has no Python 3.13 wheel.
 wbgapi>=1.0.12
 networkx>=3.3
 python-louvain>=0.16
