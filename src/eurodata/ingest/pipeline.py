@@ -18,7 +18,8 @@ def _lookup(con, table, where_col, where_val):
 
 
 def load_records(con: duckdb.DuckDBPyConnection, source_name: str,
-                 records: list[Record], vintage: dt.date | None = None) -> int:
+                 records: list[Record], vintage: dt.date | None = None,
+                 status: str = "completed") -> int:
     started = dt.datetime.now()
     source_id = _lookup(con, "source", "name", source_name)
     if source_id is None:
@@ -47,8 +48,8 @@ def load_records(con: duckdb.DuckDBPyConnection, source_name: str,
 
     con.execute(
         "INSERT INTO ingestion_run (source, started_at, ended_at, status, records_processed) "
-        "VALUES (?, ?, ?, 'completed', ?)",
-        [source_name, started, dt.datetime.now(), count],
+        "VALUES (?, ?, ?, ?, ?)",
+        [source_name, started, dt.datetime.now(), status, count],
     )
     logger.info("%s: %d records loaded, %d rejected", source_name, count, len(rejected))
     return count
@@ -56,6 +57,14 @@ def load_records(con: duckdb.DuckDBPyConnection, source_name: str,
 
 def run_source(con: duckdb.DuckDBPyConnection, source_name: str, start_year: int) -> int:
     fetcher = get_fetcher(source_name)
+    if not fetcher.enabled:
+        con.execute(
+            "INSERT INTO ingestion_run (source, started_at, ended_at, status, error) "
+            "VALUES (?, ?, ?, 'skipped', ?)",
+            [source_name, dt.datetime.now(), dt.datetime.now(), fetcher.disabled_reason],
+        )
+        logger.warning("%s skipped: %s", source_name, fetcher.disabled_reason)
+        return 0
     try:
         records = fetcher.fetch(start_year)
     except Exception as exc:  # log failure, keep pipeline alive
@@ -66,7 +75,14 @@ def run_source(con: duckdb.DuckDBPyConnection, source_name: str, start_year: int
         )
         logger.error("%s fetch failed: %s", source_name, exc)
         return 0
-    return load_records(con, source_name, records, vintage=dt.date.today())
+    for series, error in fetcher.errors:
+        con.execute(
+            "INSERT INTO ingestion_error (source, series, error) VALUES (?, ?, ?)",
+            [source_name, series, error],
+        )
+        logger.error("%s series %s failed: %s", source_name, series, error)
+    status = "completed_with_errors" if fetcher.errors else "completed"
+    return load_records(con, source_name, records, vintage=dt.date.today(), status=status)
 
 
 def run_all(con: duckdb.DuckDBPyConnection, start_year: int) -> dict[str, int]:

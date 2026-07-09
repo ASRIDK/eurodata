@@ -1,8 +1,19 @@
 [project]
 name = "eurodata"
-version = "0.1.0"
-description = "Open-source European data intelligence dataset"
+version = "0.2.0"
+description = "Open-source European data intelligence platform: dataset, pipeline, dashboard"
 requires-python = ">=3.11"
+dependencies = [
+    "duckdb>=1.0",
+    "pandas>=2.0",
+    "pydantic-settings>=2.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+ingest = ["wbgapi>=1.0"]
+app = ["streamlit>=1.37", "plotly>=5.20", "networkx>=3.2"]
+dev = ["pytest>=8.0", "wbgapi>=1.0", "streamlit>=1.37", "plotly>=5.20", "networkx>=3.2"]
 
 [build-system]
 requires = ["setuptools>=68"]

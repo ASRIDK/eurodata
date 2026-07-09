@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS indicator (
     source_priority INTEGER DEFAULT 1,
     is_forecastable BOOLEAN DEFAULT TRUE,
     frequency VARCHAR DEFAULT 'annual',
+    definition VARCHAR,
+    is_proxy BOOLEAN DEFAULT FALSE,
+    proxy_note VARCHAR,
     UNIQUE (domain_id, name)
 );
 
@@ -106,6 +109,34 @@ CREATE TABLE IF NOT EXISTS raw_snapshot (
     retrieved_at TIMESTAMP DEFAULT now(),
     file_path VARCHAR,
     sha256 VARCHAR
+);
+
+CREATE TABLE IF NOT EXISTS ingestion_error (
+    id BIGINT DEFAULT nextval('seq_ingestion_error') PRIMARY KEY,
+    source VARCHAR NOT NULL,
+    series VARCHAR,
+    error VARCHAR NOT NULL,
+    occurred_at TIMESTAMP DEFAULT now()
+);
+
+-- Structured events (elections, crises, policy milestones) for event studies.
+-- iso3 is NULL for bloc-/Europe-wide events; bloc_code is NULL for
+-- country-specific ones. tags / affected_domains are comma-separated.
+CREATE TABLE IF NOT EXISTS event (
+    id BIGINT DEFAULT nextval('seq_event') PRIMARY KEY,
+    code VARCHAR NOT NULL UNIQUE,
+    title VARCHAR NOT NULL,
+    description VARCHAR,
+    event_type VARCHAR NOT NULL,
+    iso3 VARCHAR,
+    bloc_code VARCHAR,
+    start_date DATE NOT NULL,
+    end_date DATE,
+    source VARCHAR,
+    source_url VARCHAR,
+    confidence DOUBLE DEFAULT 1.0,
+    tags VARCHAR,
+    affected_domains VARCHAR
 );
 
 CREATE TABLE IF NOT EXISTS ingestion_run (

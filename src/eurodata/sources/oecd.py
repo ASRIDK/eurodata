@@ -25,7 +25,9 @@ def normalize_oecd(rows: list[dict], indicator_code: str) -> list[Record]:
 @register
 class OECDFetcher(BaseFetcher):
     source_name = "OECD"
+    enabled = False
+    disabled_reason = ("OECD SDMX dataflow keys not wired yet; disabled so the "
+                       "pipeline records a skip instead of a fake empty run.")
 
     def fetch(self, start_year: int) -> list[Record]:
-        # OECD SDMX wiring added when specific dataflow keys are finalized.
-        return []
+        raise RuntimeError(self.disabled_reason)
