@@ -1,4 +1,4 @@
-# eurodata
+# Eurodata
 
 Open-source **European data intelligence platform**: a Python-importable dataset,
 a reproducible ingestion pipeline, and an exploratory Streamlit dashboard for
