@@ -20,6 +20,15 @@ class Record:
 
 class BaseFetcher(ABC):
     source_name: str = "base"
+    # A disabled fetcher is skipped by the pipeline, which records the reason
+    # in ingestion_run instead of silently reporting 0 records.
+    enabled: bool = True
+    disabled_reason: str | None = None
+
+    def __init__(self) -> None:
+        # (series_key, error message) for per-series failures; the pipeline
+        # persists these to ingestion_error so partial fetches stay visible.
+        self.errors: list[tuple[str, str]] = []
 
     @abstractmethod
     def fetch(self, start_year: int) -> list[Record]:

@@ -15,19 +15,31 @@ def test_country_list_shape():
 
 
 def test_blocs_and_memberships():
-    assert {"EU", "EUROZONE", "SCHENGEN", "EFTA", "EEA"} <= {b["code"] for b in BLOCS}
-    assert ("DEU", "EU") in {(m[0], m[1]) for m in MEMBERSHIPS}
+    assert {"EU", "EUROZONE", "SCHENGEN", "EFTA", "EEA", "NATO"} <= {b["code"] for b in BLOCS}
+    pairs = {(m[0], m[1]) for m in MEMBERSHIPS}
+    assert ("DEU", "EU") in pairs
+    # Regression: Eurozone/Schengen were nearly empty in v1 seed data.
+    current = [(m[0], m[1]) for m in MEMBERSHIPS if m[3] is None]
+    assert len([p for p in current if p[1] == "EUROZONE"]) >= 20
+    assert len([p for p in current if p[1] == "SCHENGEN"]) >= 25
+    assert len([p for p in current if p[1] == "EU"]) == 27
+    assert ("GBR", "EU", 1973, 2020) in set(MEMBERSHIPS)
 
 
 def test_borders_symmetry_sample():
     assert ("FRA", "DEU") in BORDERS or ("DEU", "FRA") in BORDERS
 
 
-def test_catalog_covers_four_domains():
+def test_catalog_covers_domains():
     names = {d["name"] for d in DOMAINS}
-    assert names == {"Demographics", "Economy", "Digital & Connectivity", "Energy & Green"}
+    assert {"Demographics", "Economy", "Digital & Connectivity", "Energy & Green",
+            "AI & Technology", "Governance & Geopolitics"} == names
     assert any(s["name"] == "Eurostat" and s["redistributable"] for s in SOURCES)
     assert all("domain" in ind and "api_code" in ind for ind in INDICATORS)
+    # every proxy indicator must say what it proxies
+    for ind in INDICATORS:
+        if ind.get("is_proxy"):
+            assert ind.get("proxy_note"), f"{ind['name']} is a proxy without a note"
 
 
 import duckdb
@@ -42,10 +54,12 @@ def test_seed_all_populates_tables():
     init_schema(con)
     seed_all(con)
     assert con.execute("SELECT COUNT(*) FROM geography").fetchone()[0] >= 40
-    assert con.execute("SELECT COUNT(*) FROM bloc").fetchone()[0] == 5
-    assert con.execute("SELECT COUNT(*) FROM domain").fetchone()[0] == 4
-    assert con.execute("SELECT COUNT(*) FROM indicator").fetchone()[0] == 10
-    assert con.execute("SELECT COUNT(*) FROM source").fetchone()[0] == 4
+    assert con.execute("SELECT COUNT(*) FROM bloc").fetchone()[0] == 6
+    assert con.execute("SELECT COUNT(*) FROM domain").fetchone()[0] == 6
+    assert con.execute("SELECT COUNT(*) FROM indicator").fetchone()[0] == 26
+    assert con.execute("SELECT COUNT(*) FROM source").fetchone()[0] == 5
+    assert con.execute("SELECT COUNT(*) FROM event").fetchone()[0] >= 40
     # idempotent
     seed_all(con)
-    assert con.execute("SELECT COUNT(*) FROM domain").fetchone()[0] == 4
+    assert con.execute("SELECT COUNT(*) FROM domain").fetchone()[0] == 6
+    assert con.execute("SELECT COUNT(*) FROM event").fetchone()[0] >= 40

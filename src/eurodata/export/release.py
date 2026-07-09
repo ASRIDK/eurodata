@@ -21,5 +21,5 @@ def export_facts(con: duckdb.DuckDBPyConnection, out_dir) -> Path:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / "facts.parquet"
-    con.execute(f"COPY ({_FACTS_QUERY}) TO '{out}' (FORMAT PARQUET)")
+    con.sql(_FACTS_QUERY).write_parquet(str(out))
     return out

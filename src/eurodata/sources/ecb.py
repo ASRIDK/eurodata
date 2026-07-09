@@ -26,7 +26,9 @@ def normalize_ecb(rows: list[dict], indicator_code: str) -> list[Record]:
 @register
 class ECBFetcher(BaseFetcher):
     source_name = "ECB"
+    enabled = False
+    disabled_reason = ("ECB SDMX series keys not wired yet; disabled so the "
+                       "pipeline records a skip instead of a fake empty run.")
 
     def fetch(self, start_year: int) -> list[Record]:
-        # ECB SDMX wiring added when specific series keys are finalized.
-        return []
+        raise RuntimeError(self.disabled_reason)
