@@ -17,3 +17,6 @@ data/releases/
 # Editor / tooling noise
 .DS_Store
 .omc/
+
+# Editor config (personal)
+.vscode/
