@@ -20,3 +20,4 @@ data/releases/
 
 # Editor config (personal)
 .vscode/
+.playwright-mcp/
