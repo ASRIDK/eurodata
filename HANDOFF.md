@@ -1,5 +1,22 @@
 # eurodata — Session Handoff
 
+> **Update (2026-07-10, v3 session): web platform landed.** FastAPI backend
+> (`web/backend/`) wraps the `ed` API 1:1 over a read-only DuckDB handle and
+> adds `POST /api/chat` — a Claude tool-use AI analyst over whitelisted
+> read-only tools, answering with typed blocks (text/chart/table/sources/
+> warning/follow_ups). Next.js 16 + Tailwind v4 frontend (`web/frontend/`):
+> Home, Explore, Events, and the flagship `/chat` page with the AIInput
+> component (auto-resize, Enter submits, mic icon, send button fades in).
+> Spec: `docs/superpowers/specs/2026-07-10-eurodata-v3-web-prompt.md`.
+> Verified: 58 pytest passing; `npm run build` clean (4 routes); Playwright
+> drive of /chat (empty state, submit, 503 failure state) and /explore (live
+> chart + table from the backend). Chat needs `ANTHROPIC_API_KEY` in the
+> backend env (`.env.example`); without it /api/chat returns 503 and the UI
+> shows a clean error. Run: `PYTHONPATH=src:. uvicorn web.backend.main:app
+> --port 8000` + `cd web/frontend && npm run dev` (see `web/README.md`).
+> The live end-to-end chat path (real Claude call) is **not yet exercised** —
+> no key was available this session.
+
 > **Superseded (2026-07-09, v2 session):** the platform work described in the
 > README has since landed: public Python API (`import eurodata as ed`,
 > `src/eurodata/api.py`), Eurostat fetcher rewritten on the JSON API with
