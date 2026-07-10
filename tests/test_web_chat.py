@@ -1,4 +1,4 @@
-"""Chat tool layer and block assembly (Anthropic client faked)."""
+"""Chat tool layer and block assembly (Gemini client faked)."""
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,22 +17,29 @@ from web.backend.tools import execute_tool  # noqa: E402
 
 
 class FakeClient:
-    """Plays back a scripted sequence of responses."""
+    """Plays back a scripted sequence of Gemini responses."""
 
     def __init__(self, script):
-        self.messages = SimpleNamespace(create=lambda **kw: script.pop(0))
+        self.models = SimpleNamespace(generate_content=lambda **kw: script.pop(0))
 
 
-def _text(t):
-    return SimpleNamespace(type="text", text=t)
+def _text_part(t):
+    return SimpleNamespace(text=t, function_call=None)
 
 
-def _tool_use(name, args, id="tu_1"):
-    return SimpleNamespace(type="tool_use", name=name, input=args, id=id)
+def _call_part(name, args):
+    return SimpleNamespace(
+        text=None, function_call=SimpleNamespace(name=name, args=args))
 
 
-def _resp(content, stop_reason):
-    return SimpleNamespace(content=content, stop_reason=stop_reason)
+def _resp(parts):
+    content = SimpleNamespace(role="model", parts=parts)
+    return SimpleNamespace(candidates=[SimpleNamespace(content=content)])
+
+
+def _no_key(monkeypatch):
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
 
 def test_execute_tool_series():
@@ -52,16 +59,15 @@ def test_execute_tool_lookup_error_is_payload_not_crash():
 
 def test_run_chat_assembles_typed_blocks():
     script = [
-        _resp([_tool_use("get_series", {"indicator": "GDP", "country": "FRA"})],
-              "tool_use"),
-        _resp([_text("France's GDP grew steadily since 2000.")], "end_turn"),
+        _resp([_call_part("get_series", {"indicator": "GDP", "country": "FRA"})]),
+        _resp([_text_part("France's GDP grew steadily since 2000.")]),
     ]
     blocks = run_chat([{"role": "user", "content": "How did France's GDP evolve?"}],
                       client=FakeClient(script))
-    types = [b["type"] for b in blocks]
-    assert types[0] == "text"
-    assert "chart" in types and "table" in types
-    assert "sources" in types and "follow_ups" in types
+    types_ = [b["type"] for b in blocks]
+    assert types_[0] == "text"
+    assert "chart" in types_ and "table" in types_
+    assert "sources" in types_ and "follow_ups" in types_
     chart = next(b for b in blocks if b["type"] == "chart")
     assert chart["spec"]["kind"] == "line"
     sources = next(b for b in blocks if b["type"] == "sources")
@@ -70,10 +76,10 @@ def test_run_chat_assembles_typed_blocks():
 
 def test_run_chat_correlation_warning():
     script = [
-        _resp([_tool_use("correlate", {
+        _resp([_call_part("correlate", {
             "indicator_a": "Internet Users %", "indicator_b": "GDP per capita",
-        })], "tool_use"),
-        _resp([_text("They are strongly correlated in most countries.")], "end_turn"),
+        })]),
+        _resp([_text_part("They are strongly correlated in most countries.")]),
     ]
     blocks = run_chat([{"role": "user", "content": "internet vs gdp?"}],
                       client=FakeClient(script))
@@ -82,18 +88,18 @@ def test_run_chat_correlation_warning():
 
 
 def test_run_chat_requires_key(monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _no_key(monkeypatch)
     with pytest.raises(ChatNotConfiguredError):
         run_chat([{"role": "user", "content": "hi"}])
 
 
 def test_chat_endpoint_503_without_key(monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _no_key(monkeypatch)
     client = TestClient(app)
     r = client.post("/api/chat", json={
         "messages": [{"role": "user", "content": "hello"}]})
     assert r.status_code == 503
-    assert "ANTHROPIC_API_KEY" in r.json()["detail"]
+    assert "GOOGLE_API_KEY" in r.json()["detail"]
 
 
 def test_chat_endpoint_rejects_empty():

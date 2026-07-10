@@ -10,12 +10,19 @@
 > Spec: `docs/superpowers/specs/2026-07-10-eurodata-v3-web-prompt.md`.
 > Verified: 58 pytest passing; `npm run build` clean (4 routes); Playwright
 > drive of /chat (empty state, submit, 503 failure state) and /explore (live
-> chart + table from the backend). Chat needs `ANTHROPIC_API_KEY` in the
-> backend env (`.env.example`); without it /api/chat returns 503 and the UI
-> shows a clean error. Run: `PYTHONPATH=src:. uvicorn web.backend.main:app
-> --port 8000` + `cd web/frontend && npm run dev` (see `web/README.md`).
-> The live end-to-end chat path (real Claude call) is **not yet exercised** —
-> no key was available this session.
+> chart + table from the backend).
+>
+> **Provider switched to Google Gemini** (same session, user request): chat
+> uses the `google-genai` SDK, key `GOOGLE_API_KEY`, model `GEMINI_MODEL`
+> (default `gemini-flash-latest`; retries + fallbacks `gemini-3.5-flash`,
+> `gemini-3-flash-preview` ride out 429/503/retired-model errors — Gemini
+> free tier throws these regularly; `gemini-2.5-*` is retired for new keys).
+> **Live end-to-end verified** with a real key: Gemini called get_series and
+> answered France-GDP-since-2000 with text + 26-point chart + table +
+> `GDP · World Bank` provenance chip + follow-ups. Key lives in `.env`
+> (gitignored); without it /api/chat returns 503 and the UI shows a clean
+> error. Run: `PYTHONPATH=src:. uvicorn web.backend.main:app --port 8000` +
+> `cd web/frontend && npm run dev` (see `web/README.md`).
 
 > **Superseded (2026-07-09, v2 session):** the platform work described in the
 > README has since landed: public Python API (`import eurodata as ed`,

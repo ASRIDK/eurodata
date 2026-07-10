@@ -1,4 +1,4 @@
-"""The AI analyst: Claude tool-use loop + typed response blocks.
+"""The AI analyst: Gemini function-calling loop + typed response blocks.
 
 ``run_chat`` takes the conversation as [{"role", "content"}] text messages,
 lets the model call the read-only tools in tools.py, then assembles the
@@ -7,14 +7,14 @@ text / chart / table / sources / warning / follow_ups.
 """
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
 from web.backend import deps
 from web.backend.tools import TOOL_DEFS, ToolOutcome, df_records, execute_tool
 
-DEFAULT_MODEL = "claude-sonnet-5"
+DEFAULT_MODEL = "gemini-flash-latest"
+FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3-flash-preview"]
 MAX_TURNS = 8
 
 SYSTEM_PROMPT = """You are the eurodata AI analyst: a European open-data analyst \
@@ -38,19 +38,37 @@ data, say what you can and cannot answer."""
 
 
 class ChatNotConfiguredError(RuntimeError):
-    """No Anthropic API key configured."""
+    """No Google API key configured."""
 
 
 def _client_or_raise(client: Any | None) -> Any:
     if client is not None:
         return client
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    if not (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")):
         raise ChatNotConfiguredError(
-            "The AI analyst is not configured: set ANTHROPIC_API_KEY in the "
+            "The AI analyst is not configured: set GOOGLE_API_KEY in the "
             "backend environment (see .env.example).")
-    import anthropic
+    from google import genai
 
-    return anthropic.Anthropic()
+    return genai.Client()
+
+
+def _generation_config() -> Any:
+    from google.genai import types
+
+    decls = [
+        types.FunctionDeclaration(
+            name=t["name"],
+            description=t["description"],
+            parameters_json_schema=t["input_schema"],
+        )
+        for t in TOOL_DEFS
+    ]
+    return types.GenerateContentConfig(
+        system_instruction=SYSTEM_PROMPT,
+        tools=[types.Tool(function_declarations=decls)],
+        max_output_tokens=2000,
+    )
 
 
 def _follow_ups(outcomes: list[ToolOutcome], tools_used: list[str]) -> list[str]:
@@ -118,41 +136,71 @@ def _assemble_blocks(final_text: str, outcomes: list[ToolOutcome],
     return blocks
 
 
+def _generate_with_retry(client: Any, model: str, contents: list[Any],
+                         config: Any) -> Any:
+    """One model turn, riding out transient 429/503s and retired models.
+
+    Tries the configured model with backoff, then each fallback once.
+    """
+    import time
+
+    last_exc: Exception | None = None
+    candidates = [model] + [m for m in FALLBACK_MODELS if m != model]
+    for i, m in enumerate(candidates):
+        attempts = 3 if i == 0 else 1
+        for attempt in range(attempts):
+            try:
+                return client.models.generate_content(
+                    model=m, contents=contents, config=config)
+            except Exception as exc:
+                code = getattr(exc, "code", None)
+                if code not in (404, 429, 503):
+                    raise
+                last_exc = exc
+                time.sleep(1.5 * (attempt + 1))
+    raise last_exc  # type: ignore[misc]
+
+
 def run_chat(messages: list[dict[str, str]], *, client: Any | None = None,
              model: str | None = None, ed=None) -> list[dict[str, Any]]:
     client = _client_or_raise(client)
-    model = model or os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
+    model = model or os.environ.get("GEMINI_MODEL", DEFAULT_MODEL)
     ed = ed or deps.get_ed()
 
-    convo: list[dict[str, Any]] = [
-        {"role": m["role"], "content": m["content"]} for m in messages
+    from google.genai import types
+
+    contents: list[Any] = [
+        types.Content(
+            role="user" if m["role"] == "user" else "model",
+            parts=[types.Part.from_text(text=m["content"])],
+        )
+        for m in messages
     ]
+    config = _generation_config()
     outcomes: list[ToolOutcome] = []
     tools_used: list[str] = []
     final_text = ""
 
     for _ in range(MAX_TURNS):
-        resp = client.messages.create(
-            model=model, max_tokens=1500, system=SYSTEM_PROMPT,
-            tools=TOOL_DEFS, messages=convo)
+        resp = _generate_with_retry(client, model, contents, config)
+        cand = resp.candidates[0] if resp.candidates else None
+        parts = list(cand.content.parts or []) if cand and cand.content else []
         final_text = "\n\n".join(
-            b.text for b in resp.content if getattr(b, "type", "") == "text")
-        if resp.stop_reason != "tool_use":
+            p.text for p in parts if getattr(p, "text", None))
+        calls = [p.function_call for p in parts
+                 if getattr(p, "function_call", None)]
+        if not calls:
             break
-        convo.append({"role": "assistant", "content": resp.content})
-        results = []
-        for block in resp.content:
-            if getattr(block, "type", "") != "tool_use":
-                continue
-            tools_used.append(block.name)
+        contents.append(cand.content)
+        response_parts = []
+        for fc in calls:
+            tools_used.append(fc.name)
             with deps.lock:
-                outcome = execute_tool(ed, block.name, dict(block.input))
+                outcome = execute_tool(ed, fc.name, dict(fc.args or {}))
             outcomes.append(outcome)
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": json.dumps(outcome.payload, default=str),
-            })
-        convo.append({"role": "user", "content": results})
+            response_parts.append(types.Part.from_function_response(
+                name=fc.name, response={"result": outcome.payload}))
+        # the SDK's own function-calling loop sends responses as role="user"
+        contents.append(types.Content(role="user", parts=response_parts))
 
     return _assemble_blocks(final_text, outcomes, tools_used, ed)
