@@ -15,12 +15,13 @@ cd web/frontend && npm run dev
 
 ## AI analyst
 
-`/chat` talks to `POST /api/chat`, a Claude tool-use loop over read-only
-`eurodata` tools. Configure in the backend environment (see `.env.example`):
+`/chat` talks to `POST /api/chat`, a Gemini function-calling loop over
+read-only `eurodata` tools. Configure in the backend environment (see
+`.env.example`):
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-sonnet-5   # optional
+GOOGLE_API_KEY=...                # Google AI Studio key
+GEMINI_MODEL=gemini-flash-latest  # optional
 ```
 
 Without a key the endpoint returns 503 and the chat page shows a clear
