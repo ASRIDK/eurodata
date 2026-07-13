@@ -1,5 +1,18 @@
 # eurodata — Session Handoff
 
+> **Update (2026-07-13): Startups & Business domain (7th) added** — 6
+> indicators, ids 27–32, +4,380 rows (31,190 total in `statistic_best`):
+> New Business Density / New Businesses Registered (WB Entrepreneurship DB,
+> 2006–2024), Self-employed % / Private Sector Credit (WB, 2000–2025),
+> Enterprise Birth Rate (Eurostat bd_9bd_sz_cl_r2, V97020, 2004–2020) and
+> High-growth Enterprises % (Eurostat bd_9pm_r2, V97460, 2011–2020) — both
+> Eurostat filter sets verified against the live JSON API; those datasets END
+> in 2020 (discontinued after NACE rev). WB Doing Business codes (IC.REG.*)
+> are retired from the API — don't re-add. Graph rebuilt (7 domain nodes).
+> Tests updated (hardcoded 26/6 counts in test_seed/test_api/test_graph_build
+> are now 32/7); suite 58 passing. Live AI-analyst answer over the new domain
+> verified (Estonia tops EU new-business density, 26.76/1k in 2024).
+
 > **Update (2026-07-10, v3 session): web platform landed.** FastAPI backend
 > (`web/backend/`) wraps the `ed` API 1:1 over a read-only DuckDB handle and
 > adds `POST /api/chat` — a Claude tool-use AI analyst over whitelisted

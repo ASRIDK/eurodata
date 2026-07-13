@@ -29,6 +29,13 @@ SERIES_PARAMS: dict[str, dict[str, str]] = {
                    "size_emp": "GE10", "nace_r2": "C10-S951_X_K"},
     # ICT specialists, % of total employment
     "isoc_sks_itspt": {"unit": "PC_EMP"},
+    # Enterprise birth rate, % of active enterprises (business economy
+    # except holding companies); dataset ends 2020
+    "bd_9bd_sz_cl_r2": {"indic_sb": "V97020", "sizeclas": "TOTAL",
+                        "nace_r2": "B-S_X_K642"},
+    # High-growth enterprises (employment definition), % of active
+    # enterprises with 10+ employees; dataset ends 2020
+    "bd_9pm_r2": {"indic_sb": "V97460", "nace_r2": "B-N_X_K642"},
 }
 
 

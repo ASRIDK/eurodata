@@ -54,6 +54,11 @@ class WorldBankFetcher(BaseFetcher):
         "SM.POP.NETM": "SM.POP.NETM",                  # Net migration
         "EN.GHG.CO2.PC.CE.AR5": "EN.GHG.CO2.PC.CE.AR5",# CO2 per capita
         "EG.IMP.CONS.ZS": "EG.IMP.CONS.ZS",            # Energy imports net, %
+        # v3: Startups & Business
+        "IC.BUS.NDNS.ZS": "IC.BUS.NDNS.ZS",            # New business density /1k 15-64
+        "IC.BUS.NREG": "IC.BUS.NREG",                  # New businesses registered
+        "SL.EMP.SELF.ZS": "SL.EMP.SELF.ZS",            # Self-employed, % of employment
+        "FS.AST.PRVT.GD.ZS": "FS.AST.PRVT.GD.ZS",      # Private sector credit, % GDP
     }
 
     def fetch(self, start_year: int) -> list[Record]:
