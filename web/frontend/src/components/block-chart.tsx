@@ -52,7 +52,11 @@ export function BlockChart({ spec }: { spec: ChartSpec }) {
       byX.set(p.x, row);
     }
   }
-  const data = [...byX.values()].sort((a, b) => Number(a.x) - Number(b.x));
+  // String-aware sort: x may be a year (2020) or a period label ("2020-Q1",
+  // "2020-03"); Number() on the latter is NaN and would scramble the axis.
+  const data = [...byX.values()].sort((a, b) =>
+    String(a.x).localeCompare(String(b.x), "en", { numeric: true }),
+  );
 
   return (
     <ChartFrame unit={spec.unit}>

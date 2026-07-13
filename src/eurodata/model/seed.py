@@ -46,19 +46,21 @@ def seed_all(con: duckdb.DuckDBPyConnection) -> None:
     for i, ind in enumerate(INDICATORS, start=1):
         con.execute(
             "INSERT INTO indicator (id, domain_id, name, unit, api_code, source_priority, "
-            "definition, is_proxy, proxy_note) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+            "definition, is_proxy, proxy_note, frequency) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
             [i, domain_ids[ind["domain"]], ind["name"], ind["unit"],
              ind["api_code"], ind["source_priority"], ind.get("definition"),
-             ind.get("is_proxy", False), ind.get("proxy_note")],
+             ind.get("is_proxy", False), ind.get("proxy_note"),
+             ind.get("frequency", "annual")],
         )
         # Upsert metadata so databases seeded before these fields existed
         # (or with stale values) pick up the current catalog.
         con.execute(
             "UPDATE indicator SET unit = ?, api_code = ?, definition = ?, "
-            "is_proxy = ?, proxy_note = ? WHERE domain_id = ? AND name = ?",
+            "is_proxy = ?, proxy_note = ?, frequency = ? WHERE domain_id = ? AND name = ?",
             [ind["unit"], ind["api_code"], ind.get("definition"),
              ind.get("is_proxy", False), ind.get("proxy_note"),
+             ind.get("frequency", "annual"),
              domain_ids[ind["domain"]], ind["name"]],
         )
     for i, s in enumerate(SOURCES, start=1):

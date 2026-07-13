@@ -6,8 +6,9 @@ studying Europe through open data — economy, demographics, digital, energy &
 climate, AI & technology, plus a curated **event layer** for before/after
 analysis.
 
-- **Facts** — 40k+ official statistics (32 indicators × 50 countries × 2000–2025)
-  in a single DuckDB fact table with revision lineage and per-record source.
+- **Facts** — ~32k current official statistics (32 indicators × 49 countries ×
+  2000–2025; ~72k rows including revision history) in a single DuckDB fact
+  table with revision lineage and per-record source.
 - **Events** — 43 curated, dated European events (memberships, crises, policy
   milestones) with primary-source URLs, for event studies.
 - **Graph** — countries, indicators, sources and blocs as a NetworkX-ready
@@ -37,6 +38,9 @@ ed.search_indicators("AI")
 
 ed.series(country="FRA", indicator="GDP")            # tidy DataFrame
 ed.series(indicator="Median Age", bloc="EU")         # bloc filter
+ed.series(country="FRA", indicator="Inflation (HICP, monthly)")  # monthly rows
+ed.series(indicator="GDP", rebase=2000)              # index: 2000 = 100
+ed.series(indicator="GDP", yoy=True)                 # % change y/y
 ed.compare(["FRA", "DEU", "ITA"], "Unemployment Rate")
 ed.latest("GDP per capita")
 ed.coverage()                        # rows/countries/years per indicator
@@ -47,7 +51,8 @@ ed.events(event_type="ai_regulation")
 ed.event_study(indicator="Inflation (HICP)",
                event_code="energy-crisis-2021", window_years=3)
 
-# Correlations (per-country Pearson; correlation ≠ causation)
+# Correlations (per-country Pearson with p-values + Fisher-z 95% CIs;
+# correlation ≠ causation)
 ed.correlate("Internet Users %", "GDP per capita")
 ed.lagged_correlation("R&D Expenditure (% GDP)", "GDP per capita", lag=2)
 
@@ -62,13 +67,15 @@ Unknown names raise `ed.EuroDataLookupError` with did-you-mean suggestions.
 
 | Source | Used for | License |
 |--------|----------|---------|
-| **Eurostat** (JSON API) | Median age, HICP inflation, AI adoption, ICT specialists | CC BY 4.0 |
+| **Eurostat** (JSON API) | Median age, HICP inflation (annual + monthly), quarterly GDP growth, AI adoption, ICT specialists | CC BY 4.0 |
 | **World Bank** | 22 indicator series (fallback + global coverage) | CC BY 4.0 |
-| **ECB / OECD** | *disabled* — fetchers not wired yet; the pipeline records an explicit skip | — |
+| **ECB** (SDMX CSV) | monthly long-term interest rates (10y), exchange rates vs EUR | ECB reuse policy (attribution) |
+| **OECD** (SDMX CSV) | monthly unemployment rate (OECD members) | OECD terms (attribution) |
 | **eurodata curated** | event layer (each event cites its primary source) | CC BY 4.0 compilation |
 
-When both Eurostat and World Bank provide a series, `statistic_best` prefers
-Eurostat. Three indicators are **proxies** and flagged as such in the catalog
+When several sources provide a series, `statistic_best` keeps the one with the
+highest `source.reliability_score` (Eurostat and ECB rank above OECD and World
+Bank). Three indicators are **proxies** and flagged as such in the catalog
 and dashboard: Inflation (WB CPI vs HICP), Broadband (subscriptions vs
 coverage), Government Debt (central vs general government).
 
@@ -80,9 +87,11 @@ See [docs/data-dictionary.md](docs/data-dictionary.md),
 
 The database is fully rebuildable from scripts: `init_db.py` (schema + seeds) →
 `run_ingestion.py` (fetch with timeouts/retries; failures land in
-`ingestion_run` / `ingestion_error`, never silently swallowed) →
+`ingestion_run` / `ingestion_error`, never silently swallowed; Eurostat raw
+responses are snapshotted with sha256 under `data/raw/` — World Bank data comes
+through `wbgapi`, which does not expose raw payloads) →
 `build_graph.py` → `make_release.py` (Parquet export of redistributable data).
 
 ```bash
-PYTHONPATH=src python -m pytest -q   # 42 tests, no network needed
+PYTHONPATH=src python -m pytest -q   # test suite, no network needed
 ```

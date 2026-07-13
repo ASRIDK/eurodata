@@ -88,6 +88,22 @@ INDICATORS = [
      "definition": "Enterprise births as % of active enterprises, business economy except holding companies (Eurostat bd_9bd_sz_cl_r2, indic_sb=V97020); 2004-2020."},
     {"domain": "Startups & Business", "name": "High-growth Enterprises %", "unit": "%", "api_code": "bd_9pm_r2", "source_priority": 1,
      "definition": "High-growth enterprises (10%+ annual employment growth over 3 years) as % of active enterprises with 10+ employees (Eurostat bd_9pm_r2, indic_sb=V97460); 2011-2020."},
+    # --- added in v4: sub-annual series (append-only; ids are positional) ---
+    {"domain": "Economy", "name": "Long-term Interest Rate (10y)", "unit": "%", "api_code": "IRS", "source_priority": 1,
+     "frequency": "monthly",
+     "definition": "Long-term interest rate for convergence purposes: 10-year government bond yield, monthly (ECB IRS dataflow, Maastricht criterion); EU countries only."},
+    {"domain": "Economy", "name": "Exchange Rate vs EUR", "unit": "national currency per EUR", "api_code": "EXR", "source_priority": 1,
+     "frequency": "monthly",
+     "definition": "ECB reference exchange rate, national currency per euro, monthly average (ECB EXR dataflow). Non-euro countries only; euro-area members have no series by construction. RUB suspended March 2022."},
+    {"domain": "Economy", "name": "Inflation (HICP, monthly)", "unit": "%", "api_code": "prc_hicp_manr", "source_priority": 1,
+     "frequency": "monthly",
+     "definition": "HICP all-items, monthly annual rate of change, % (Eurostat prc_hicp_manr, unit=RCH_A). The official euro-area inflation measure at monthly frequency."},
+    {"domain": "Economy", "name": "GDP Growth (quarterly)", "unit": "%", "api_code": "namq_10_gdp", "source_priority": 1,
+     "frequency": "quarterly",
+     "definition": "GDP chain-linked volume, % change vs the same quarter of the previous year, seasonally and calendar adjusted (Eurostat namq_10_gdp, unit=CLV_PCH_SM, na_item=B1GQ)."},
+    {"domain": "Economy", "name": "Unemployment Rate (monthly)", "unit": "%", "api_code": "DF_IALFS_UNE_M", "source_priority": 1,
+     "frequency": "monthly",
+     "definition": "Monthly unemployment rate, % of the labour force, seasonally adjusted, ages 15+ (OECD DSD_LFS@DF_IALFS_UNE_M); OECD member countries only."},
 ]
 
 SOURCES = [
