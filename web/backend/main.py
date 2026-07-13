@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
+
+load_dotenv()  # GOOGLE_API_KEY etc. from .env, regardless of how uvicorn was launched
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
