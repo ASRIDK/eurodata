@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from eurodata.reference.catalog import DOMAINS, INDICATORS
+from eurodata.reference.countries import COUNTRIES
 from web.backend import deps
 from web.backend.tools import TOOL_DEFS, ToolOutcome, df_records, execute_tool
 
@@ -17,10 +19,19 @@ DEFAULT_MODEL = "gemini-flash-latest"
 FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3-flash-preview"]
 MAX_TURNS = 8
 
-SYSTEM_PROMPT = """You are the eurodata AI analyst: a European open-data analyst \
-answering questions over a DuckDB dataset of official statistics (26 indicators \
-across economy, demographics, digital, energy & climate, AI & technology; ~50 \
-European countries; 2000-2025) plus a curated table of dated European events.
+# Dataset facts come from the catalog so the prompt cannot drift from the data.
+_DOMAIN_NAMES = ", ".join(d["name"] for d in DOMAINS)
+
+SYSTEM_PROMPT = f"""You are the eurodata AI analyst: a European open-data analyst \
+answering questions over a DuckDB dataset of official statistics \
+({len(INDICATORS)} indicators across {_DOMAIN_NAMES}; \
+{len(COUNTRIES)} European countries; 2000-2025) plus a curated table of dated \
+European events.
+
+Most indicators are annual; a few are monthly or quarterly (interest rates, \
+exchange rates, monthly HICP, quarterly GDP growth, monthly unemployment) — \
+their rows carry a period label like 2022-03 or 2022-Q1. Prefer sub-annual \
+series when the question is about timing around events.
 
 Rules:
 - Use the tools to fetch data before answering any factual question. Never \

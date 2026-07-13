@@ -57,7 +57,12 @@ def test_seed_all_populates_tables():
     assert con.execute("SELECT COUNT(*) FROM geography").fetchone()[0] >= 40
     assert con.execute("SELECT COUNT(*) FROM bloc").fetchone()[0] == 6
     assert con.execute("SELECT COUNT(*) FROM domain").fetchone()[0] == 7
-    assert con.execute("SELECT COUNT(*) FROM indicator").fetchone()[0] == 32
+    assert con.execute("SELECT COUNT(*) FROM indicator").fetchone()[0] == 37
+    # sub-annual indicators carry their frequency (default is 'annual')
+    freqs = dict(con.execute(
+        "SELECT name, frequency FROM indicator WHERE frequency != 'annual'").fetchall())
+    assert freqs["Long-term Interest Rate (10y)"] == "monthly"
+    assert freqs["GDP Growth (quarterly)"] == "quarterly"
     assert con.execute("SELECT COUNT(*) FROM source").fetchone()[0] == 5
     assert con.execute("SELECT COUNT(*) FROM event").fetchone()[0] >= 40
     # idempotent

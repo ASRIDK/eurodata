@@ -69,7 +69,7 @@ TOOL_DEFS: list[dict[str, Any]] = [
     },
     {
         "name": "get_series",
-        "description": "Fetch a time series for one indicator, optionally filtered by country (ISO-3, ISO-2 or name) or bloc (EU, EZ, SCH, EFTA, EEA, NATO) and year range.",
+        "description": "Fetch a time series for one indicator, optionally filtered by country (ISO-3, ISO-2 or name) or bloc (EU, EZ, SCH, EFTA, EEA, NATO) and year range. Some indicators are monthly or quarterly (see the period field). Optional transforms: rebase (index=100 at a year) or yoy (% change vs same period previous year).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -78,6 +78,8 @@ TOOL_DEFS: list[dict[str, Any]] = [
                 "bloc": {"type": "string"},
                 "start": {"type": "integer"},
                 "end": {"type": "integer"},
+                "rebase": {"type": "integer", "description": "Index each country to 100 at this year, for cross-country level comparisons"},
+                "yoy": {"type": "boolean", "description": "Convert to % change vs the same period one year earlier"},
             },
             "required": ["indicator"],
         },
@@ -154,13 +156,14 @@ TOOL_DEFS: list[dict[str, Any]] = [
 
 
 def _long_chart(rows: list[dict], *, unit: str | None) -> dict[str, Any] | None:
-    """Line chart from long-format series rows (iso3/country/year/value)."""
+    """Line chart from long-format series rows (iso3/country/period/value)."""
     if not rows:
         return None
     series: dict[str, list[dict]] = {}
     for r in rows[:MAX_CHART_POINTS]:
         name = r.get("country") or r.get("iso3") or "value"
-        series.setdefault(name, []).append({"x": r["year"], "y": r["value"]})
+        series.setdefault(name, []).append(
+            {"x": r.get("period") or r["year"], "y": r["value"]})
     return {
         "kind": "line",
         "unit": unit,
@@ -178,7 +181,7 @@ def _series_outcome(df: pd.DataFrame) -> ToolOutcome:
         for r in rows if r.get("is_proxy") and r.get("proxy_note")
     })
     payload_rows = [
-        {k: r[k] for k in ("iso3", "year", "value")} for r in rows[:MAX_MODEL_ROWS]
+        {k: r.get(k) for k in ("iso3", "period", "value")} for r in rows[:MAX_MODEL_ROWS]
     ]
     payload = {
         "unit": unit,
@@ -217,7 +220,8 @@ def _dispatch(ed: EuroData, name: str, args: dict[str, Any]) -> ToolOutcome:
     if name == "get_series":
         df = ed.series(
             country=args.get("country"), indicator=args["indicator"],
-            bloc=args.get("bloc"), start=args.get("start"), end=args.get("end"))
+            bloc=args.get("bloc"), start=args.get("start"), end=args.get("end"),
+            rebase=args.get("rebase"), yoy=bool(args.get("yoy", False)))
         return _series_outcome(df)
 
     if name == "compare_countries":
@@ -308,7 +312,7 @@ def _dispatch(ed: EuroData, name: str, args: dict[str, Any]) -> ToolOutcome:
             chart=chart,
             table=df_table(df),
             indicators=[args["indicator_a"], args["indicator_b"]],
-            warnings=["Correlation is not causation: these are per-country Pearson correlations over yearly values."],
+            warnings=["Correlation is not causation: per-country Pearson correlations over yearly values, with Fisher-z 95% CIs; p-values are unadjusted for multiple comparisons."],
         )
 
     return ToolOutcome(payload={"error": f"Unknown tool: {name}"})

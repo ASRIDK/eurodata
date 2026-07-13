@@ -166,11 +166,14 @@ AND COALESCE(s.quarter, -1) = latest.q
 AND COALESCE(s.month, -1) = latest.m
 AND COALESCE(s.vintage_date, DATE '0001-01-01') = latest.max_vintage;
 
+-- One row per (geography, indicator, period): the most reliable source wins
+-- (source.reliability_score; Eurostat and ECB rank above OECD and World Bank),
+-- with source id as a deterministic tie-break.
 CREATE OR REPLACE VIEW statistic_best AS
 SELECT c.* FROM statistic_current c
-JOIN indicator i ON i.id = c.indicator_id
+JOIN source src ON src.id = c.source_id
 QUALIFY ROW_NUMBER() OVER (
     PARTITION BY c.geography_id, c.indicator_id, c.year,
                  COALESCE(c.quarter, -1), COALESCE(c.month, -1)
-    ORDER BY i.source_priority ASC, c.source_id ASC
+    ORDER BY src.reliability_score DESC, c.source_id ASC
 ) = 1;

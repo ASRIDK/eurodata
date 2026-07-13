@@ -62,13 +62,16 @@ class WorldBankFetcher(BaseFetcher):
     }
 
     def fetch(self, start_year: int) -> list[Record]:
+        import datetime as dt
+
         import wbgapi as wb  # lazy import
 
         records: list[Record] = []
         economies = [c["iso3"] for c in COUNTRIES]
+        end_year = dt.date.today().year + 1  # include the current year
         for eu_code, wb_code in self.WB_CODES.items():
             try:
-                df = wb.data.DataFrame(wb_code, economies, range(start_year, 2026),
+                df = wb.data.DataFrame(wb_code, economies, range(start_year, end_year),
                                        labels=False).reset_index()
                 rows = []
                 for _, r in df.iterrows():

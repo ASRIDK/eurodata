@@ -30,6 +30,10 @@ def db() -> EuroData:
         recs.append(Record("ITA", "GB.XPD.RSDV.GD.ZS", year, float(v)))
         if year + 2 <= 2022:
             recs.append(Record("ITA", "sdg_08_10", year + 2, float(v)))
+    # Monthly HICP: 1.0 through 2019, 2.0 through 2020 (month-precision target)
+    for year, val in ((2019, 1.0), (2020, 2.0)):
+        for m in range(1, 13):
+            recs.append(Record("DEU", "prc_hicp_manr", year, val, month=m))
     load_records(con, "World Bank", recs, vintage=dt.date(2026, 1, 1))
     handle = EuroData.from_connection(con)
     yield handle
@@ -81,7 +85,7 @@ def test_latest_and_compare(db):
 
 def test_coverage_includes_empty(db):
     cov = db.coverage()
-    assert len(cov) == 32
+    assert len(cov) == 37
     medage = cov[cov["indicator"] == "Median Age"].iloc[0]
     assert medage["rows"] == 0
 
@@ -117,9 +121,61 @@ def test_correlate_and_lag(db):
     ita = lagged[lagged["iso3"] == "ITA"].iloc[0]
     assert ita["correlation"] == pytest.approx(1.0)
     # at lag 0 the series are shifted copies -> correlation clearly below 1
+    # (min_years=5: only 9 overlapping years remain at lag 0)
     lag0 = db.lagged_correlation("R&D Expenditure (% GDP)", "GDP per capita",
-                                 lag=0)
+                                 lag=0, min_years=5)
     assert lag0[lag0["iso3"] == "ITA"]["correlation"].iloc[0] < 0.9
+
+
+def test_correlation_stats(db):
+    r0 = db.correlate("GDP", "GDP")
+    row = r0.iloc[0]
+    # a perfect correlation over 11 years: p ~ 0, CI hugging 1
+    assert row["p_value"] < 1e-6
+    assert row["ci_low"] > 0.99 and row["ci_high"] >= row["ci_low"]
+    # default min_years=10 drops the 9-year overlap at lag 0
+    lag0 = db.lagged_correlation("R&D Expenditure (% GDP)", "GDP per capita")
+    assert "ITA" not in set(lag0["iso3"])
+
+
+def test_sub_annual_series_periods(db):
+    s = db.series(country="DEU", indicator="Inflation (HICP, monthly)")
+    assert len(s) == 24
+    first = s.iloc[0]
+    assert first["period"] == "2019-01" and first["month"] == 1
+    assert first["t"] == pytest.approx(2019.0)
+    assert list(s["t"]) == sorted(s["t"])
+
+
+def test_event_study_month_precision(db):
+    # covid-pandemic-2020 starts 2020-03-11: with monthly data, Jan/Feb 2020
+    # belong to the BEFORE window and March 2020 to the AFTER window.
+    study = db.event_study(indicator="Inflation (HICP, monthly)",
+                           event_code="covid-pandemic-2020", window_years=1)
+    row = study[study["iso3"] == "DEU"].iloc[0]
+    assert row["n_before"] == 12   # 2019-03 .. 2020-02
+    assert row["n_after"] == 10    # 2020-03 .. 2020-12
+    assert row["after_mean"] == 2.0
+    assert row["before_mean"] == pytest.approx((10 * 1.0 + 2 * 2.0) / 12)
+
+
+def test_series_rebase(db):
+    s = db.series(indicator="GDP", rebase=2010)
+    deu_2020 = s[(s["iso3"] == "DEU") & (s["year"] == 2020)]["value"].iloc[0]
+    assert deu_2020 == pytest.approx(200.0)  # 200 vs base 100
+    assert set(s["unit"]) == {"index (2010=100)"}
+
+
+def test_series_yoy(db):
+    s = db.series(country="DEU", indicator="GDP", yoy=True)
+    assert len(s) == 10  # first year has no prior-year base
+    assert s[s["year"] == 2011]["value"].iloc[0] == pytest.approx(10.0)
+    assert set(s["unit"]) == {"% y/y"}
+
+
+def test_rebase_yoy_mutually_exclusive(db):
+    with pytest.raises(ValueError):
+        db.series(indicator="GDP", rebase=2010, yoy=True)
 
 
 def test_query_and_relation(db):
