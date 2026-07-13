@@ -85,9 +85,12 @@ def coverage() -> dict:
 def series(indicator: str | None = None, country: str | None = None,
            bloc: str | None = None, domain: str | None = None,
            start: int | None = None, end: int | None = None,
+           rebase: int | None = None, yoy: bool = False,
            limit: int = 5000) -> dict:
+    if rebase is not None and yoy:
+        raise HTTPException(422, "rebase and yoy are mutually exclusive")
     df = _query("series", indicator=indicator, country=country, bloc=bloc,
-                domain=domain, start=start, end=end)
+                domain=domain, start=start, end=end, rebase=rebase, yoy=yoy)
     return {"rows": df_records(df, limit)}
 
 
@@ -132,8 +135,9 @@ def event_study(indicator: str, event_code: str | None = None,
 
 
 @app.get("/api/correlate")
-def correlate(a: str, b: str, lag: int = 0) -> dict:
-    df = _query("lagged_correlation", indicator_a=a, indicator_b=b, lag=lag)
+def correlate(a: str, b: str, lag: int = 0, min_years: int = 10) -> dict:
+    df = _query("lagged_correlation", indicator_a=a, indicator_b=b, lag=lag,
+                min_years=min_years)
     return {"rows": df_records(df)}
 
 

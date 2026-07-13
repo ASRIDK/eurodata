@@ -42,8 +42,10 @@ def build_graph(con: duckdb.DuckDBPyConnection) -> None:
 
     for iid, _, did in indicators:
         edge(indicator_node[iid], domain_node[did], "BELONGS_TO")
-    for sid, _ in sources:
-        for iid, _, _ in indicators:
+    # PROVIDES reflects what was actually ingested, not the full source catalog.
+    for sid, iid in con.execute(
+            "SELECT DISTINCT source_id, indicator_id FROM statistic_record").fetchall():
+        if sid in source_node and iid in indicator_node:
             edge(source_node[sid], indicator_node[iid], "PROVIDES")
     for cid, bid in con.execute(
             "SELECT geography_id, bloc_id FROM geography_bloc").fetchall():

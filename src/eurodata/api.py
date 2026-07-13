@@ -15,7 +15,9 @@ use); ``ed.open(path)`` swaps in a different database.
 """
 from __future__ import annotations
 
+import math
 from difflib import get_close_matches
+from pathlib import Path
 
 import duckdb
 import pandas as pd
@@ -34,9 +36,18 @@ def _suggest(value: str, candidates: list[str], kind: str) -> str:
     return f"Unknown {kind}: {value!r}.{hint}"
 
 
+# period: '2020' / '2020-Q3' / '2020-07'; t: decimal year (period start) for
+# plotting and ordering sub-annual series.
 _SERIES_SQL = """
 SELECT g.iso3, g.name AS country, d.name AS domain, i.name AS indicator,
-       s.year, s.value, COALESCE(s.unit, i.unit) AS unit,
+       s.year, s.quarter, s.month,
+       CASE WHEN s.month IS NOT NULL THEN printf('%d-%02d', s.year, s.month)
+            WHEN s.quarter IS NOT NULL THEN printf('%d-Q%d', s.year, s.quarter)
+            ELSE CAST(s.year AS VARCHAR) END AS period,
+       s.year + CASE WHEN s.month IS NOT NULL THEN (s.month - 1) / 12.0
+                     WHEN s.quarter IS NOT NULL THEN (s.quarter - 1) / 4.0
+                     ELSE 0.0 END AS t,
+       s.value, COALESCE(s.unit, i.unit) AS unit,
        src.name AS source, i.is_proxy, i.proxy_note
 FROM statistic_best s
 JOIN geography g ON g.id = s.geography_id
@@ -44,6 +55,53 @@ JOIN indicator i ON i.id = s.indicator_id
 JOIN domain d ON d.id = i.domain_id
 JOIN source src ON src.id = s.source_id
 """
+
+
+def _yoy_transform(df: pd.DataFrame) -> pd.DataFrame:
+    """Year-over-year % change: each value vs the same period one year earlier."""
+    if df.empty:
+        return df
+    keys = ["iso3", "indicator", "year", "_q", "_m"]
+    df = df.assign(_q=df["quarter"].fillna(-1), _m=df["month"].fillna(-1))
+    prev = df[keys + ["value"]].copy()
+    prev["year"] = prev["year"] + 1
+    merged = df.merge(prev, on=keys, how="inner", suffixes=("", "_prev"))
+    merged = merged[merged["value_prev"] != 0]
+    merged["value"] = (merged["value"] / merged["value_prev"] - 1.0) * 100.0
+    merged["unit"] = "% y/y"
+    return (merged.drop(columns=["value_prev", "_q", "_m"])
+                  .sort_values(["indicator", "iso3", "t"]).reset_index(drop=True))
+
+
+def _rebase_transform(df: pd.DataFrame, base_year: int) -> pd.DataFrame:
+    """Index each country's series to 100 at base_year (mean if sub-annual).
+
+    Countries with no observation in base_year are dropped.
+    """
+    if df.empty:
+        return df
+    base = (df[df["year"] == base_year]
+            .groupby(["iso3", "indicator"])["value"].mean().rename("_base"))
+    merged = df.merge(base, on=["iso3", "indicator"], how="inner")
+    merged = merged[merged["_base"] != 0]
+    merged["value"] = merged["value"] / merged["_base"] * 100.0
+    merged["unit"] = f"index ({base_year}=100)"
+    return (merged.drop(columns=["_base"])
+                  .sort_values(["indicator", "iso3", "t"]).reset_index(drop=True))
+
+
+def _pearson_stats(r: float, n: int) -> tuple[float | None, float | None, float | None]:
+    """Two-sided p-value and 95% CI for a Pearson r via the Fisher z-transform.
+
+    Normal approximation (no scipy needed); requires n > 3.
+    """
+    if n <= 3 or pd.isna(r):
+        return None, None, None
+    r_c = max(-0.999999999, min(0.999999999, r))  # atanh(±1) is infinite
+    z = math.atanh(r_c)
+    se = 1.0 / math.sqrt(n - 3)
+    p = 2.0 * (1.0 - 0.5 * (1.0 + math.erf(abs(z / se) / math.sqrt(2.0))))
+    return p, math.tanh(z - 1.959964 * se), math.tanh(z + 1.959964 * se)
 
 
 class EuroData:
@@ -54,6 +112,14 @@ class EuroData:
         try:
             self._con = _connect(db_path, read_only=read_only)
         except duckdb.Error as exc:
+            if Path(db_path).exists():
+                # The file is there: a lock conflict (Streamlit / ingestion
+                # holding it) or corruption, NOT a missing database.
+                raise RuntimeError(
+                    f"Could not open eurodata database at {db_path!r} — the file "
+                    f"exists, so another process may hold its lock (close the "
+                    f"Streamlit app or ingestion run and retry): {exc}"
+                ) from exc
             raise FileNotFoundError(
                 f"Could not open eurodata database at {db_path!r} "
                 f"(run `python scripts/init_db.py` and `python scripts/run_ingestion.py` "
@@ -165,9 +231,21 @@ class EuroData:
     def series(self, country: str | None = None, indicator: str | None = None, *,
                domain: str | None = None, source: str | None = None,
                bloc: str | None = None, start: int | None = None,
-               end: int | None = None) -> pd.DataFrame:
+               end: int | None = None, rebase: int | None = None,
+               yoy: bool = False) -> pd.DataFrame:
         """Time series filtered by any combination of country / indicator /
-        domain / source / bloc (current members) / year range."""
+        domain / source / bloc (current members) / year range.
+
+        Sub-annual series carry ``quarter``/``month``, a ``period`` label
+        ('2020-Q3', '2020-07') and a decimal-year ``t`` for plotting.
+
+        Transforms (mutually exclusive):
+        - ``rebase=2000`` indexes each country to 100 at that year;
+        - ``yoy=True`` converts values to % change vs the same period one
+          year earlier.
+        """
+        if rebase is not None and yoy:
+            raise ValueError("rebase and yoy are mutually exclusive transforms")
         where, params = [], []
         if country is not None:
             where.append("s.geography_id = ?")
@@ -194,26 +272,33 @@ class EuroData:
         sql = _SERIES_SQL
         if where:
             sql += " WHERE " + " AND ".join(where)
-        return self.query(sql + " ORDER BY indicator, iso3, year", params)
+        df = self.query(sql + " ORDER BY indicator, iso3, t", params)
+        if yoy:
+            df = _yoy_transform(df)
+        if rebase is not None:
+            df = _rebase_transform(df, rebase)
+        return df
 
     def latest(self, indicator: str, *, bloc: str | None = None) -> pd.DataFrame:
         """Most recent value of an indicator for every country."""
         df = self.series(indicator=indicator, bloc=bloc)
         if df.empty:
             return df
-        idx = df.groupby("iso3")["year"].idxmax()
+        idx = df.groupby("iso3")["t"].idxmax()
         return (df.loc[idx].sort_values("value", ascending=False)
                   .reset_index(drop=True))
 
     def compare(self, countries: list[str], indicator: str, *,
                 start: int | None = None, end: int | None = None) -> pd.DataFrame:
-        """Wide year x country table for one indicator."""
+        """Wide period x country table for one indicator (index: year for
+        annual series, period label for sub-annual ones)."""
         frames = [self.series(country=c, indicator=indicator, start=start, end=end)
                   for c in countries]
         long = pd.concat(frames, ignore_index=True)
         if long.empty:
             return long
-        return long.pivot_table(index="year", columns="iso3", values="value")
+        index = "year" if long["period"].nunique() == long["year"].nunique() else "period"
+        return long.pivot_table(index=index, columns="iso3", values="value")
 
     def coverage(self, indicator: str | None = None) -> pd.DataFrame:
         """Rows / countries / year span per indicator; empty indicators included."""
@@ -297,9 +382,13 @@ class EuroData:
                     window_years: int = 3) -> pd.DataFrame:
         """Before/after comparison of an indicator around events.
 
-        For each matching event and affected country, compares the indicator
-        mean over [year-window, year-1] with [year, year+window]. Returns one
-        row per (event, country) with before/after means and deltas.
+        Windows are measured from the event *date* (month precision), not the
+        calendar year: each observation is placed at its period midpoint, and
+        the before window is [event - window_years, event), the after window
+        [event, event + window_years]. With monthly or quarterly series this
+        gives up to 12x/4x more observations per window than annual data.
+        Returns one row per (event, country) with before/after means and
+        deltas. Descriptive, not causal.
         """
         ind_id = self._resolve_indicator(indicator)
         evs = self.events(event_type=event_type)
@@ -310,13 +399,22 @@ class EuroData:
                 raise EuroDataLookupError(_suggest(event_code, codes, "event"))
         data = self.query(
             f"{_SERIES_SQL} WHERE s.indicator_id = ?", [ind_id])
+        # Period midpoints: month -> (m-0.5)/12, quarter -> (q-0.5)/4, year -> +0.5
+        data = data.assign(t_mid=data["year"]
+                           + ((data["month"] - 0.5) / 12.0)
+                             .fillna((data["quarter"] - 0.5) / 4.0)
+                             .fillna(0.5))
         out = []
         for _, ev in evs.iterrows():
-            year = int(str(ev["start_date"])[:4])
+            start = str(ev["start_date"])
+            year, ev_month = int(start[:4]), int(start[5:7])
+            ev_t = year + (ev_month - 0.5) / 12.0
             for iso3 in self._event_countries(ev):
                 cdata = data[data["iso3"] == iso3]
-                before = cdata[(cdata["year"] >= year - window_years) & (cdata["year"] < year)]["value"]
-                after = cdata[(cdata["year"] >= year) & (cdata["year"] <= year + window_years)]["value"]
+                before = cdata[(cdata["t_mid"] >= ev_t - window_years)
+                               & (cdata["t_mid"] < ev_t)]["value"]
+                after = cdata[(cdata["t_mid"] >= ev_t)
+                              & (cdata["t_mid"] <= ev_t + window_years)]["value"]
                 if before.empty or after.empty:
                     continue
                 b, a = before.mean(), after.mean()
@@ -329,18 +427,26 @@ class EuroData:
 
     # -- correlations -----------------------------------------------------
     def _indicator_frame(self, indicator: str) -> pd.DataFrame:
+        """One value per (country, year); sub-annual series are annualized
+        (mean) so correlations always align on calendar years."""
         ind_id = self._resolve_indicator(indicator)
         return self.query(
-            "SELECT g.iso3, s.year, s.value FROM statistic_best s "
-            "JOIN geography g ON g.id = s.geography_id WHERE s.indicator_id = ?",
+            "SELECT g.iso3, s.year, AVG(s.value) AS value FROM statistic_best s "
+            "JOIN geography g ON g.id = s.geography_id WHERE s.indicator_id = ? "
+            "GROUP BY g.iso3, s.year",
             [ind_id])
 
+    _CORR_COLUMNS = ["iso3", "n_years", "correlation", "p_value",
+                     "ci_low", "ci_high", "lag"]
+
     def lagged_correlation(self, indicator_a: str, indicator_b: str, *,
-                           lag: int = 0, min_years: int = 5) -> pd.DataFrame:
+                           lag: int = 0, min_years: int = 10) -> pd.DataFrame:
         """Per-country Pearson correlation of a(t) with b(t + lag).
 
         lag > 0 tests whether indicator_a leads indicator_b by `lag` years.
-        Countries with fewer than min_years overlapping observations are dropped.
+        Countries with fewer than min_years overlapping years are dropped.
+        p_value and the 95% CI [ci_low, ci_high] come from the Fisher
+        z-transform (normal approximation, unadjusted for multiple tests).
         """
         a = self._indicator_frame(indicator_a).rename(columns={"value": "a"})
         b = self._indicator_frame(indicator_b).rename(columns={"value": "b"})
@@ -350,14 +456,16 @@ class EuroData:
         for iso3, grp in merged.groupby("iso3"):
             if len(grp) < min_years or grp["a"].std() == 0 or grp["b"].std() == 0:
                 continue
-            rows.append({"iso3": iso3, "n_years": len(grp),
-                         "correlation": grp["a"].corr(grp["b"]), "lag": lag})
+            r = grp["a"].corr(grp["b"])
+            p, lo, hi = _pearson_stats(r, len(grp))
+            rows.append({"iso3": iso3, "n_years": len(grp), "correlation": r,
+                         "p_value": p, "ci_low": lo, "ci_high": hi, "lag": lag})
         return (pd.DataFrame(rows).sort_values("correlation", ascending=False)
-                  .reset_index(drop=True) if rows else pd.DataFrame(
-                      columns=["iso3", "n_years", "correlation", "lag"]))
+                  .reset_index(drop=True) if rows
+                else pd.DataFrame(columns=self._CORR_COLUMNS))
 
     def correlate(self, indicator_a: str, indicator_b: str, *,
-                  min_years: int = 5) -> pd.DataFrame:
+                  min_years: int = 10) -> pd.DataFrame:
         """Per-country Pearson correlation between two indicators (lag 0)."""
         return self.lagged_correlation(indicator_a, indicator_b, lag=0,
                                        min_years=min_years)

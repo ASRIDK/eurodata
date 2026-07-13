@@ -31,27 +31,38 @@ def load_records(con: duckdb.DuckDBPyConnection, source_name: str,
                con.execute("SELECT id, api_code FROM indicator WHERE api_code IS NOT NULL").fetchall()}
 
     count = 0
+    unmatched = 0
     for r in valid:
         gid = geo_ids.get(r.iso3)
         iid = ind_ids.get(r.indicator_code)
         if gid is None or iid is None:
+            unmatched += 1
             continue
-        con.execute(
+        # RETURNING makes ON CONFLICT DO NOTHING countable: 0 rows on conflict.
+        inserted = con.execute(
             "INSERT INTO statistic_record "
             "(geography_id, indicator_id, source_id, year, quarter, month, value, "
             " unit, currency, price_basis, vintage_date) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING "
+            "RETURNING id",
             [gid, iid, source_id, r.year, r.quarter, r.month, r.value,
              r.unit, r.currency, r.price_basis, vintage],
+        ).fetchall()
+        count += len(inserted)
+    if unmatched:
+        con.execute(
+            "INSERT INTO ingestion_error (source, series, error) VALUES (?, ?, ?)",
+            [source_name, None,
+             f"{unmatched} records referenced an unseeded geography or indicator"],
         )
-        count += 1
 
     con.execute(
         "INSERT INTO ingestion_run (source, started_at, ended_at, status, records_processed) "
         "VALUES (?, ?, ?, ?, ?)",
         [source_name, started, dt.datetime.now(), status, count],
     )
-    logger.info("%s: %d records loaded, %d rejected", source_name, count, len(rejected))
+    logger.info("%s: %d records loaded, %d rejected, %d unmatched",
+                source_name, count, len(rejected), unmatched)
     return count
 
 

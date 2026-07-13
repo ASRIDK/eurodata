@@ -1,7 +1,28 @@
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+
+_PERIOD_RE = re.compile(r"^(\d{4})(?:-(Q([1-4])|(\d{2})))?$")
+
+
+def parse_period(time_period: str) -> tuple[int, int | None, int | None] | None:
+    """SDMX TIME_PERIOD -> (year, quarter, month).
+
+    Accepts '2020' (annual), '2020-Q3' (quarterly), '2020-07' (monthly);
+    returns None for anything else (weekly/daily periods are not modeled).
+    """
+    m = _PERIOD_RE.match(str(time_period).strip())
+    if not m:
+        return None
+    year = int(m.group(1))
+    if m.group(3):
+        return year, int(m.group(3)), None
+    if m.group(4):
+        month = int(m.group(4))
+        return (year, None, month) if 1 <= month <= 12 else None
+    return year, None, None
 
 
 @dataclass(frozen=True)
