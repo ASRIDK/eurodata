@@ -81,7 +81,7 @@ def test_latest_and_compare(db):
 
 def test_coverage_includes_empty(db):
     cov = db.coverage()
-    assert len(cov) == 26
+    assert len(cov) == 32
     medage = cov[cov["indicator"] == "Median Age"].iloc[0]
     assert medage["rows"] == 0
 

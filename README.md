@@ -6,7 +6,7 @@ studying Europe through open data — economy, demographics, digital, energy &
 climate, AI & technology, plus a curated **event layer** for before/after
 analysis.
 
-- **Facts** — 40k+ official statistics (26 indicators × 50 countries × 2000–2025)
+- **Facts** — 40k+ official statistics (32 indicators × 50 countries × 2000–2025)
   in a single DuckDB fact table with revision lineage and per-record source.
 - **Events** — 43 curated, dated European events (memberships, crises, policy
   milestones) with primary-source URLs, for event studies.

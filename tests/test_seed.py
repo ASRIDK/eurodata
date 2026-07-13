@@ -33,7 +33,8 @@ def test_borders_symmetry_sample():
 def test_catalog_covers_domains():
     names = {d["name"] for d in DOMAINS}
     assert {"Demographics", "Economy", "Digital & Connectivity", "Energy & Green",
-            "AI & Technology", "Governance & Geopolitics"} == names
+            "AI & Technology", "Governance & Geopolitics",
+            "Startups & Business"} == names
     assert any(s["name"] == "Eurostat" and s["redistributable"] for s in SOURCES)
     assert all("domain" in ind and "api_code" in ind for ind in INDICATORS)
     # every proxy indicator must say what it proxies
@@ -55,11 +56,11 @@ def test_seed_all_populates_tables():
     seed_all(con)
     assert con.execute("SELECT COUNT(*) FROM geography").fetchone()[0] >= 40
     assert con.execute("SELECT COUNT(*) FROM bloc").fetchone()[0] == 6
-    assert con.execute("SELECT COUNT(*) FROM domain").fetchone()[0] == 6
-    assert con.execute("SELECT COUNT(*) FROM indicator").fetchone()[0] == 26
+    assert con.execute("SELECT COUNT(*) FROM domain").fetchone()[0] == 7
+    assert con.execute("SELECT COUNT(*) FROM indicator").fetchone()[0] == 32
     assert con.execute("SELECT COUNT(*) FROM source").fetchone()[0] == 5
     assert con.execute("SELECT COUNT(*) FROM event").fetchone()[0] >= 40
     # idempotent
     seed_all(con)
-    assert con.execute("SELECT COUNT(*) FROM domain").fetchone()[0] == 6
+    assert con.execute("SELECT COUNT(*) FROM domain").fetchone()[0] == 7
     assert con.execute("SELECT COUNT(*) FROM event").fetchone()[0] >= 40

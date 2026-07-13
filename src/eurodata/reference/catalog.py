@@ -5,6 +5,8 @@ DOMAINS = [
     {"name": "Energy & Green", "description": "Energy, renewables, emissions", "color": "#72B7B2"},
     {"name": "AI & Technology", "description": "R&D, innovation, patents, AI adoption", "color": "#B279A2"},
     {"name": "Governance & Geopolitics", "description": "Memberships, policy and geopolitical events (event layer)", "color": "#E45756"},
+    # --- added in v3 (append-only; ids are positional) ---
+    {"name": "Startups & Business", "description": "Entrepreneurship, business demography, startup environment", "color": "#FF9DA6"},
 ]
 
 # domain must match a DOMAINS name; api_code is the series key fetchers emit.
@@ -73,6 +75,19 @@ INDICATORS = [
      "definition": "CO2 emissions excluding LULUCF, tonnes per capita, AR5 (World Bank EN.GHG.CO2.PC.CE.AR5)."},
     {"domain": "Energy & Green", "name": "Energy Imports Net %", "unit": "%", "api_code": "EG.IMP.CONS.ZS", "source_priority": 1,
      "definition": "Energy imports, net, % of energy use (World Bank EG.IMP.CONS.ZS, from IEA aggregates); series ends mid-2010s."},
+    # --- added in v3: Startups & Business (append-only; ids are positional) ---
+    {"domain": "Startups & Business", "name": "New Business Density", "unit": "per 1,000 people 15-64", "api_code": "IC.BUS.NDNS.ZS", "source_priority": 1,
+     "definition": "New business registrations (LLCs) per 1,000 people ages 15-64 (World Bank Entrepreneurship Database, IC.BUS.NDNS.ZS); ~2006-2024."},
+    {"domain": "Startups & Business", "name": "New Businesses Registered", "unit": "registrations", "api_code": "IC.BUS.NREG", "source_priority": 1,
+     "definition": "New limited-liability companies registered per calendar year (World Bank Entrepreneurship Database, IC.BUS.NREG); ~2006-2024."},
+    {"domain": "Startups & Business", "name": "Self-employed %", "unit": "%", "api_code": "SL.EMP.SELF.ZS", "source_priority": 1,
+     "definition": "Self-employed workers, % of total employment, ILO modelled estimate (World Bank SL.EMP.SELF.ZS)."},
+    {"domain": "Startups & Business", "name": "Private Sector Credit (% GDP)", "unit": "%", "api_code": "FS.AST.PRVT.GD.ZS", "source_priority": 1,
+     "definition": "Domestic credit to private sector, % of GDP (World Bank FS.AST.PRVT.GD.ZS) — financing environment for firms."},
+    {"domain": "Startups & Business", "name": "Enterprise Birth Rate", "unit": "%", "api_code": "bd_9bd_sz_cl_r2", "source_priority": 1,
+     "definition": "Enterprise births as % of active enterprises, business economy except holding companies (Eurostat bd_9bd_sz_cl_r2, indic_sb=V97020); 2004-2020."},
+    {"domain": "Startups & Business", "name": "High-growth Enterprises %", "unit": "%", "api_code": "bd_9pm_r2", "source_priority": 1,
+     "definition": "High-growth enterprises (10%+ annual employment growth over 3 years) as % of active enterprises with 10+ employees (Eurostat bd_9pm_r2, indic_sb=V97460); 2011-2020."},
 ]
 
 SOURCES = [

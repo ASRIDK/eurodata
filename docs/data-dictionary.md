@@ -7,7 +7,7 @@
 | `geography` | 50 European countries (ISO2/ISO3, transcontinental/disputed flags) |
 | `bloc`, `geography_bloc` | EU, Eurozone, Schengen, EFTA, EEA, NATO memberships with `since_year`/`until_year`. **Current membership queries must filter `until_year IS NULL`** (e.g. GBR has EU membership 1973–2020). |
 | `domain` | Demographics, Economy, Digital & Connectivity, Energy & Green, AI & Technology, Governance & Geopolitics |
-| `indicator` | 26 indicators: `unit`, `api_code` (source series key), `definition`, `is_proxy`, `proxy_note` |
+| `indicator` | 32 indicators (7 domains): `unit`, `api_code` (source series key), `definition`, `is_proxy`, `proxy_note` |
 | `source` | Source organizations with `license` and `redistributable` |
 | `statistic_record` | Facts: value, unit, year, `vintage_date` (revision lineage), `retrieved_at` |
 | `event` | Curated events: `event_type`, `iso3`/`bloc_code` scope, dates, `source_url`, `confidence`, `tags`, `affected_domains` |
