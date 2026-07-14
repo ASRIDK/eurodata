@@ -15,6 +15,7 @@ use); ``ed.open(path)`` swaps in a different database.
 """
 from __future__ import annotations
 
+import json
 import math
 from difflib import get_close_matches
 from pathlib import Path
@@ -188,8 +189,52 @@ class EuroData:
 
     def sources(self) -> pd.DataFrame:
         return self.query(
-            "SELECT name, organization, url, license, redistributable, update_frequency "
-            "FROM source ORDER BY id")
+            "SELECT name, organization, url, reliability_score, license, "
+            "redistributable, update_frequency FROM source ORDER BY reliability_score DESC, id")
+
+    def correlation_graph(self, indicator: str | None = None) -> pd.DataFrame:
+        """`CORRELATES_WITH` structural graph edges: growth-rate correlation
+        between indicator pairs, pooled across countries and FDR-corrected
+        (see `eurodata.graph.correlate` for the full methodology). Pass
+        `indicator` to only return edges touching that indicator; omit it
+        for the whole graph.
+
+        Columns: indicator_a, indicator_b, domain_a, domain_b, weight
+        (signed pooled Pearson r on YoY growth rates), relationship
+        ('contemporaneous' / 'a_leads_b' / 'b_leads_a' — whichever lag test
+        was strongest for the pair), direction ('a_leads_b' / 'b_leads_a' /
+        'undetermined' — only set when a per-country Granger causality test
+        confirms it), q_value (Benjamini-Hochberg FDR-corrected across every
+        pair tested), n_countries (how many contributed to the pooled stat).
+
+        Empty if the graph hasn't been built yet (`scripts/build_graph.py`).
+        """
+        sql = (
+            "SELECT ia.name AS indicator_a, ib.name AS indicator_b, "
+            "da.name AS domain_a, db.name AS domain_b, e.weight, e.props "
+            "FROM graph_edge e "
+            "JOIN graph_node na ON na.id = e.src_node_id "
+            "JOIN graph_node nb ON nb.id = e.dst_node_id "
+            "JOIN indicator ia ON ia.id = na.ref_id "
+            "JOIN indicator ib ON ib.id = nb.ref_id "
+            "JOIN domain da ON da.id = ia.domain_id "
+            "JOIN domain db ON db.id = ib.domain_id "
+            "WHERE e.edge_type = 'CORRELATES_WITH'")
+        params: list = []
+        if indicator is not None:
+            ind_id = self._resolve_indicator(indicator)
+            sql += " AND (na.ref_id = ? OR nb.ref_id = ?)"
+            params += [ind_id, ind_id]
+        df = self.query(sql, params)
+        if df.empty:
+            return df.assign(relationship=None, direction=None, q_value=None, n_countries=None)
+        meta = df.pop("props").apply(json.loads)
+        df["relationship"] = meta.apply(lambda m: m["relationship"])
+        df["direction"] = meta.apply(lambda m: m["direction"])
+        df["q_value"] = meta.apply(lambda m: m["q_value"])
+        df["n_countries"] = meta.apply(lambda m: m["n_countries"])
+        return (df.reindex(df["weight"].abs().sort_values(ascending=False).index)
+                  .reset_index(drop=True))
 
     def years(self) -> tuple[int, int]:
         lo, hi = self._con.execute(
@@ -506,6 +551,7 @@ bloc_members = _delegate("bloc_members")
 domains = _delegate("domains")
 indicators = _delegate("indicators")
 sources = _delegate("sources")
+correlation_graph = _delegate("correlation_graph")
 years = _delegate("years")
 search_indicators = _delegate("search_indicators")
 series = _delegate("series")
@@ -526,5 +572,5 @@ __all__ = [
     "countries", "blocs", "bloc_members", "domains", "indicators", "sources",
     "years", "search_indicators", "series", "latest", "compare", "coverage",
     "ingestion_summary", "events", "event_types", "event_study",
-    "correlate", "lagged_correlation", "query", "relation",
+    "correlate", "lagged_correlation", "correlation_graph", "query", "relation",
 ]

@@ -31,8 +31,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export type Row = Record<string, string | number | boolean | null>;
 
 export type ChartSpec = {
-  kind: "line" | "bar";
+  kind: "line" | "bar" | "area" | "scatter" | "pie";
   unit: string | null;
+  title?: string | null;
   series: { name: string; points: { x: number | string; y: number | null }[] }[];
 };
 
