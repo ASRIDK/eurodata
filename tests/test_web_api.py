@@ -74,3 +74,14 @@ def test_correlate():
         "a": "Internet Users %", "b": "GDP per capita",
     }).json()["rows"]
     assert rows and {"iso3", "correlation", "n_years"} <= set(rows[0])
+
+
+def test_correlation_graph():
+    rows = client.get("/api/correlation-graph").json()["rows"]
+    assert rows and {"indicator_a", "indicator_b", "weight", "relationship",
+                      "direction", "q_value", "n_countries"} <= set(rows[0])
+    assert all(r["q_value"] < 0.05 for r in rows)
+
+    focused = client.get("/api/correlation-graph", params={"indicator": "GDP"}).json()["rows"]
+    assert focused
+    assert all("GDP" in (r["indicator_a"], r["indicator_b"]) for r in focused)

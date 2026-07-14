@@ -74,6 +74,44 @@ def test_run_chat_assembles_typed_blocks():
     assert any("GDP" in item["label"] for item in sources["items"])
 
 
+def test_execute_tool_render_chart():
+    outcome = execute_tool(deps.get_ed(), "render_chart", {
+        "kind": "pie",
+        "title": "GDP share",
+        "unit": "%",
+        "series": [{"name": "GDP share", "points": [
+            {"x": "DEU", "y": 30}, {"x": "FRA", "y": 25}, {"x": "??", "y": None},
+        ]}],
+    })
+    assert outcome.payload == {"rendered": "pie", "n_series": 1, "n_points": 2}
+    assert outcome.chart["kind"] == "pie"
+    assert outcome.chart["title"] == "GDP share"
+    assert outcome.chart["series"][0]["points"] == [
+        {"x": "DEU", "y": 30}, {"x": "FRA", "y": 25}]
+
+
+def test_execute_tool_render_chart_rejects_bad_kind():
+    outcome = execute_tool(deps.get_ed(), "render_chart",
+                           {"kind": "sankey", "series": []})
+    assert "sankey" in outcome.payload["error"]
+    assert outcome.chart is None
+
+
+def test_run_chat_render_chart_wins_over_auto_chart():
+    script = [
+        _resp([_call_part("get_series", {"indicator": "GDP", "country": "FRA"})]),
+        _resp([_call_part("render_chart", {"kind": "area", "series": [
+            {"name": "France GDP",
+             "points": [{"x": 2000, "y": 1.0}, {"x": 2001, "y": 1.1}]},
+        ]})]),
+        _resp([_text_part("Here is the area chart.")]),
+    ]
+    blocks = run_chat([{"role": "user", "content": "area chart of France GDP"}],
+                      client=FakeClient(script))
+    chart = next(b for b in blocks if b["type"] == "chart")
+    assert chart["spec"]["kind"] == "area"
+
+
 def test_run_chat_correlation_warning():
     script = [
         _resp([_call_part("correlate", {

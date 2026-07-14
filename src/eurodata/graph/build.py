@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+
 import duckdb
 
+from eurodata.graph.correlate import compute_correlation_edges
 from eurodata.reference.borders import BORDERS
 
 
@@ -36,9 +39,9 @@ def build_graph(con: duckdb.DuckDBPyConnection) -> None:
     source_node = {sid: _node_id(con, "source", sid, name, counter) for sid, name in sources}
     bloc_node = {bid: _node_id(con, "bloc", bid, name, counter) for bid, name in blocs}
 
-    def edge(src, dst, etype, weight=1.0):
-        con.execute("INSERT INTO graph_edge (src_node_id, dst_node_id, edge_type, weight) "
-                    "VALUES (?, ?, ?, ?)", [src, dst, etype, weight])
+    def edge(src, dst, etype, weight=1.0, props=None):
+        con.execute("INSERT INTO graph_edge (src_node_id, dst_node_id, edge_type, weight, props) "
+                    "VALUES (?, ?, ?, ?, ?)", [src, dst, etype, weight, props])
 
     for iid, _, did in indicators:
         edge(indicator_node[iid], domain_node[did], "BELONGS_TO")
@@ -53,4 +56,40 @@ def build_graph(con: duckdb.DuckDBPyConnection) -> None:
             edge(country_node[cid], bloc_node[bid], "MEMBER_OF")
     for a, b in BORDERS:
         if a in iso3_to_cid and b in iso3_to_cid:
-            edge(country_node[iso3_to_cid[a]], country_node[iso3_to_cid[b]], "BORDERS")
+            # Borders are a symmetric relation; the graph itself is directed
+            # (to represent CORRELATES_WITH lead/lag direction below), so
+            # store both directions to keep BORDERS behaving as undirected.
+            n1, n2 = country_node[iso3_to_cid[a]], country_node[iso3_to_cid[b]]
+            edge(n1, n2, "BORDERS")
+            edge(n2, n1, "BORDERS")
+
+    # CORRELATES_WITH: indicator<->indicator, growth-rate correlation pooled
+    # across countries, FDR-corrected across all pairs tested. See
+    # eurodata.graph.correlate for the full methodology. Edge direction
+    # (src -> dst) follows the Granger-style lead/lag verdict when there is
+    # one; otherwise it's an arbitrary (indicator_a -> indicator_b) ordering
+    # and props["direction"] == "undetermined" says so explicitly.
+    for result in compute_correlation_edges(con):
+        src, dst = indicator_node[result.indicator_a], indicator_node[result.indicator_b]
+        if result.direction == "b_leads_a":
+            src, dst = dst, src
+        props = json.dumps({
+            "q_value": result.q_value,
+            "p_value": result.p_value,
+            "n_countries": result.n_countries,
+            "relationship": result.relationship,
+            "direction": result.direction,
+            "granger_p_a_to_b": result.granger_p_a_to_b,
+            "granger_p_b_to_a": result.granger_p_b_to_a,
+            "per_country": result.per_country,
+            "method": ("Pearson r on YoY growth rate per country, pooled via a "
+                       "Fisher-z-weighted average; tested contemporaneously and at "
+                       "a 1-year lag in both directions, the strongest of the three "
+                       "wins ('relationship'), Bonferroni-adjusted for the tests "
+                       "tried on this pair; direction (when present) additionally "
+                       "requires a one-sided per-country lag-1 Granger causality "
+                       "result, combined across countries via Fisher's method; "
+                       "q_value is Benjamini-Hochberg FDR-corrected across every "
+                       "indicator pair tested."),
+        })
+        edge(src, dst, "CORRELATES_WITH", weight=result.weight, props=props)

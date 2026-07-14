@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 const LINKS = [
   { href: "/", label: "Home" },
   { href: "/explore", label: "Explore" },
+  { href: "/ranking", label: "Ranking" },
+  { href: "/correlations", label: "Correlations" },
   { href: "/events", label: "Events" },
   { href: "/chat", label: "AI Chat" },
 ];
@@ -18,7 +20,7 @@ export function Navbar() {
     <header className="sticky top-0 z-20 border-b border-black/10 bg-white/80 backdrop-blur dark:border-white/10 dark:bg-black/60">
       <nav className="mx-auto flex h-14 max-w-5xl items-center gap-1 px-4">
         <Link href="/" className="mr-4 font-semibold tracking-tight">
-          eurodata
+          European Data
         </Link>
         {LINKS.map((l) => (
           <Link

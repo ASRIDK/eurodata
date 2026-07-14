@@ -140,6 +140,41 @@ TOOL_DEFS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "render_chart",
+        "description": "Render a chart of a specific kind for the user (line, bar, area, scatter, or pie). Use when the user asks for a particular chart/diagram/graph type or a custom visualisation. Build the points from data returned by the other tools — never invent values. This chart replaces the auto-generated one in the UI.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["line", "bar", "area", "scatter", "pie"]},
+                "title": {"type": "string", "description": "Short chart title"},
+                "unit": {"type": "string", "description": "Unit of the y values"},
+                "series": {
+                    "type": "array",
+                    "description": "One entry per line/group; pie uses only the first series (x = slice label, y = value)",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "points": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "x": {"anyOf": [{"type": "string"}, {"type": "number"}], "description": "Category label, year, period, or numeric x"},
+                                        "y": {"type": "number"},
+                                    },
+                                    "required": ["x", "y"],
+                                },
+                            },
+                        },
+                        "required": ["name", "points"],
+                    },
+                },
+            },
+            "required": ["kind", "series"],
+        },
+    },
+    {
         "name": "correlate",
         "description": "Per-country Pearson correlation between two indicators, optionally with indicator_a leading by `lag` years. Correlation is not causation.",
         "input_schema": {
@@ -197,6 +232,49 @@ def _series_outcome(df: pd.DataFrame) -> ToolOutcome:
         indicators=indicators,
         sources=sources,
         warnings=warnings,
+    )
+
+
+def _render_chart_outcome(args: dict[str, Any]) -> ToolOutcome:
+    """Model-authored chart: sanitise the spec and hand it to the frontend."""
+    kind = args.get("kind")
+    if kind not in ("line", "bar", "area", "scatter", "pie"):
+        return ToolOutcome(payload={"error": f"Unknown chart kind: {kind!r}"})
+
+    budget = MAX_CHART_POINTS
+    series = []
+    for s in args.get("series") or []:
+        points = []
+        for p in (s.get("points") or [])[:budget]:
+            x, y = _clean(p.get("x")), _clean(p.get("y"))
+            if x is None:
+                continue
+            if not isinstance(y, (int, float)):
+                y = None
+            if y is None and kind in ("scatter", "pie"):
+                continue
+            if kind == "scatter":
+                try:
+                    x = float(x)
+                except (TypeError, ValueError):
+                    continue
+            points.append({"x": x, "y": y})
+        if points:
+            budget -= len(points)
+            series.append({"name": str(s.get("name") or "value"), "points": points})
+    if kind == "pie":
+        series = series[:1]
+    if not series:
+        return ToolOutcome(payload={"error": "render_chart got no usable points"})
+
+    chart = {"kind": kind, "unit": args.get("unit"), "series": series}
+    if args.get("title"):
+        chart["title"] = str(args["title"])
+    return ToolOutcome(
+        payload={"rendered": kind,
+                 "n_series": len(series),
+                 "n_points": sum(len(s["points"]) for s in series)},
+        chart=chart,
     )
 
 
@@ -294,6 +372,9 @@ def _dispatch(ed: EuroData, name: str, args: dict[str, Any]) -> ToolOutcome:
             indicators=[args["indicator"]],
             warnings=["Event-study deltas compare window means before/after the event; they are descriptive, not causal."],
         )
+
+    if name == "render_chart":
+        return _render_chart_outcome(args)
 
     if name == "correlate":
         lag = int(args.get("lag", 0))

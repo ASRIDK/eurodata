@@ -18,7 +18,7 @@ interface AIInputProps {
 
 export function AIInput({
   id = "ai-input",
-  placeholder = "Ask eurodata anything...",
+  placeholder = "Ask about European data...",
   minHeight = 52,
   maxHeight = 200,
   disabled = false,
@@ -53,6 +53,7 @@ export function AIInput({
           style={{ minHeight, maxHeight }}
           className={cn(
             "w-full resize-none overflow-y-auto rounded-3xl border-none",
+            "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
             "bg-black/5 px-6 py-4 pr-16 text-black",
             "placeholder:text-black/50",
             "focus-visible:ring-0 focus-visible:ring-offset-0",
