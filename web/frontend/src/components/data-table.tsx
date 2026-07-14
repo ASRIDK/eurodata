@@ -1,5 +1,8 @@
-function fmt(v: string | number | boolean | null): string {
+import { isValidElement, type ReactNode } from "react";
+
+function fmt(v: ReactNode): ReactNode {
   if (v === null || v === undefined) return "–";
+  if (isValidElement(v)) return v;
   if (typeof v === "number") {
     return Number.isInteger(v) && Math.abs(v) < 10000
       ? String(v)
@@ -14,7 +17,7 @@ export function DataTable({
   rows,
 }: {
   columns: string[];
-  rows: (string | number | boolean | null)[][];
+  rows: ReactNode[][];
 }) {
   if (!rows.length) return null;
   return (

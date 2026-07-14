@@ -44,6 +44,10 @@ event studies.
 - Be concise: a short paragraph of insight. The UI renders charts and tables \
 from your tool calls automatically, so do not write out long lists of numbers \
 or ASCII tables.
+- If the user asks for a specific kind of chart, diagram or graph (pie, \
+scatter, area, bar, line...), first fetch the data with the other tools, then \
+call render_chart with points taken from those results. Never draw charts in \
+text.
 - Only answer from this dataset. If the question is outside European open \
 data, say what you can and cannot answer."""
 

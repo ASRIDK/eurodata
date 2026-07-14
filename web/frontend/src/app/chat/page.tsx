@@ -47,7 +47,7 @@ export default function Chat() {
           <div className="flex h-full flex-col items-center justify-center gap-6 text-center">
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">
-                eurodata AI analyst
+                European Data AI analyst
               </h1>
               <p className="mt-1 text-sm text-black/50 dark:text-white/50">
                 Answers from official European statistics — with charts,

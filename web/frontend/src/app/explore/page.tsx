@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BlockChart } from "@/components/block-chart";
 import { DataTable } from "@/components/data-table";
 import { api, type ChartSpec, type Row } from "@/lib/api";
+import { Flag, FlagName } from "@/components/flag";
 
 const DEFAULT_COUNTRIES = ["FRA", "DEU", "ITA"];
 
@@ -120,7 +121,7 @@ export default function Explore() {
               onClick={() => setSelected(selected.filter((s) => s !== iso))}
               className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-xs hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
             >
-              {iso} <X className="h-3 w-3" />
+              <Flag code={iso} className="h-3" /> {iso} <X className="h-3 w-3" />
             </button>
           ))}
         </div>
@@ -150,7 +151,12 @@ export default function Explore() {
             columns={["country", "latest year", "value", "unit"]}
             rows={latestByCountry
               .filter((r): r is Row => r !== null)
-              .map((r) => [r.country, r.year, r.value, r.unit])}
+              .map((r) => [
+                <FlagName key={String(r.iso3)} value={r.country} />,
+                r.year,
+                r.value,
+                r.unit,
+              ])}
           />
         </div>
       ) : (

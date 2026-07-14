@@ -74,6 +74,11 @@ def sources() -> dict:
     return {"rows": df_records(_query("sources"))}
 
 
+@app.get("/api/correlation-graph")
+def correlation_graph(indicator: str | None = None) -> dict:
+    return {"rows": df_records(_query("correlation_graph", indicator=indicator))}
+
+
 @app.get("/api/search")
 def search(q: str) -> dict:
     return {"rows": df_records(_query("search_indicators", text=q))}
