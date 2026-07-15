@@ -58,6 +58,35 @@ def test_latest_ranked():
     assert values == sorted(values, reverse=True)
 
 
+def test_forecast_route():
+    r = client.get("/api/forecast",
+                   params={"indicator": "GDP per capita", "country": "FRA",
+                           "horizon": 3})
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["forecast"]) == 3
+    assert body["history"]
+    assert body["method"] in (
+        "drift", "linear", "log_linear", "holt", "seasonal_naive", "holt_winters")
+    assert "not a prediction" in body["disclaimer"].lower()
+    fc0 = body["forecast"][0]
+    assert {"t", "period", "value", "lo", "hi"} <= set(fc0)
+
+
+def test_forecast_route_rejects_bad_horizon():
+    r = client.get("/api/forecast",
+                   params={"indicator": "GDP per capita", "country": "FRA",
+                           "horizon": 0})
+    assert r.status_code == 422
+
+
+def test_forecast_route_rejects_bad_level():
+    r = client.get("/api/forecast",
+                   params={"indicator": "GDP per capita", "country": "FRA",
+                           "level": 1.5})
+    assert r.status_code == 422
+
+
 def test_events_filter():
     rows = client.get("/api/events", params={"since": "2020-01-01"}).json()["rows"]
     assert rows and all(str(r["start_date"]) >= "2020-01-01" for r in rows)

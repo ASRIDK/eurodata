@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from eurodata import EuroDataLookupError
 from web.backend import deps
 from web.backend.chat import ChatNotConfiguredError, run_chat
-from web.backend.tools import df_records
+from web.backend.tools import _clean, df_records
 
 app = FastAPI(title="eurodata API", version="0.1.0")
 
@@ -110,6 +110,29 @@ def series(indicator: str | None = None, country: str | None = None,
     df = _query("series", indicator=indicator, country=country, bloc=bloc,
                 domain=domain, start=start, end=end, rebase=rebase, yoy=yoy)
     return {"rows": df_records(df, limit)}
+
+
+@app.get("/api/forecast")
+def forecast(indicator: str, country: str, horizon: int = 5,
+             level: float = 0.8) -> dict:
+    if not 1 <= horizon <= 30:
+        raise HTTPException(422, "horizon must be between 1 and 30")
+    if not 0 < level < 1:
+        raise HTTPException(422, "level must be between 0 and 1 (exclusive)")
+    df = _query("forecast", indicator=indicator, country=country,
+                horizon=horizon, level=level)
+    hist = df[df["kind"] == "history"]
+    fc = df[df["kind"] == "forecast"]
+    return {
+        "history": df_records(hist[["t", "period", "value"]]),
+        "forecast": df_records(fc[["t", "period", "value", "lo", "hi"]]),
+        "method": _clean(df.attrs["method"]),
+        "freq": _clean(df.attrs["freq"]),
+        "backtest_mae": _clean(df.attrs["backtest_mae"]),
+        "fallback": _clean(df.attrs["fallback"]),
+        "disclaimer": _clean(df.attrs["disclaimer"]),
+        "unit": _clean(df.attrs["unit"]),
+    }
 
 
 @app.get("/api/compare")

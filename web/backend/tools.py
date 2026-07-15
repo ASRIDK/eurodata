@@ -187,6 +187,19 @@ TOOL_DEFS: list[dict[str, Any]] = [
             "required": ["indicator_a", "indicator_b"],
         },
     },
+    {
+        "name": "forecast",
+        "description": "Project one indicator's series for a single country a few periods into the future, with an uncertainty band. Uses simple auto-selected statistical models (trend/exponential-smoothing; seasonal for monthly/quarterly). This is trend extrapolation, NOT a prediction — always relay the returned disclaimer and name the method. Do not forecast further than a few years.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "indicator": {"type": "string"},
+                "country": {"type": "string", "description": "ISO-3, ISO-2, or name"},
+                "horizon": {"type": "integer", "default": 5, "description": "periods ahead (1-15)"},
+            },
+            "required": ["indicator", "country"],
+        },
+    },
 ]
 
 
@@ -394,6 +407,43 @@ def _dispatch(ed: EuroData, name: str, args: dict[str, Any]) -> ToolOutcome:
             table=df_table(df),
             indicators=[args["indicator_a"], args["indicator_b"]],
             warnings=["Correlation is not causation: per-country Pearson correlations over yearly values, with Fisher-z 95% CIs; p-values are unadjusted for multiple comparisons."],
+        )
+
+    if name == "forecast":
+        horizon = int(args.get("horizon") or 5)
+        horizon = max(1, min(horizon, 15))
+        df = ed.forecast(args["indicator"], args["country"], horizon=horizon)
+        hist = df[df["kind"] == "history"]
+        fc = df[df["kind"] == "forecast"]
+        unit = df.attrs.get("unit")
+        chart = {
+            "kind": "line",
+            "unit": unit,
+            "title": f"{args['indicator']} — {args['country']} (forecast)",
+            "series": [
+                {"name": args["country"],
+                 "points": [{"x": r["period"], "y": r["value"]}
+                            for r in df_records(hist)]},
+                {"name": f"{args['country']} forecast",
+                 "dashed": True,
+                 "points": [{"x": r["period"], "y": r["value"]}
+                            for r in df_records(fc)],
+                 "band": [{"x": r["period"], "lo": r["lo"], "hi": r["hi"]}
+                          for r in df_records(fc)]},
+            ],
+        }
+        return ToolOutcome(
+            payload={
+                "method": df.attrs["method"],
+                "fallback": df.attrs["fallback"],
+                "backtest_mae": df.attrs["backtest_mae"],
+                "disclaimer": df.attrs["disclaimer"],
+                "unit": unit,
+                "forecast": [{k: r.get(k) for k in ("period", "value", "lo", "hi")}
+                             for r in df_records(fc)],
+            },
+            chart=chart,
+            warnings=[df.attrs["disclaimer"]],
         )
 
     return ToolOutcome(payload={"error": f"Unknown tool: {name}"})
