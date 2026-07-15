@@ -189,3 +189,21 @@ def test_module_level_delegation_docs():
     # Module-level wrappers exist and carry the method docstrings.
     assert ed.series.__doc__ and "Time series" in ed.series.__doc__
     assert ed.event_study.__name__ == "event_study"
+
+
+def test_forecast_extends_annual_series(ed):
+    df = ed.forecast("GDP per capita", "FRA", horizon=3)
+    hist = df[df["kind"] == "history"]
+    fc = df[df["kind"] == "forecast"]
+    assert len(fc) == 3
+    assert len(hist) > 0
+    # forecast t values continue past the last history t
+    assert fc["t"].min() > hist["t"].max()
+    # band present on forecast rows, absent on history
+    assert fc["lo"].notna().all() and fc["hi"].notna().all()
+    assert hist["lo"].isna().all()
+    # metadata
+    assert df.attrs["method"] in (
+        "drift", "linear", "log_linear", "holt", "seasonal_naive", "holt_winters")
+    assert "not a prediction" in df.attrs["disclaimer"].lower()
+    assert df.attrs["country"] == "FRA"
