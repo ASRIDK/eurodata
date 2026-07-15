@@ -52,6 +52,14 @@ def _to_iso3(geo: str) -> str | None:
     return _ISO2_TO_ISO3.get(geo)
 
 
+def dataset_id(api_code: str) -> str:
+    """Eurostat dataset id for a catalog api_code. A ``#suffix`` disambiguates
+    multiple catalog indicators drawn from one dataset (e.g.
+    ``isoc_ci_ac_i#Y16_24``); it is stripped for the HTTP call but kept as the
+    record's indicator_code so it matches the catalog row."""
+    return api_code.split("#", 1)[0]
+
+
 def normalize_eurostat(rows: list[dict], indicator_code: str) -> list[Record]:
     out: list[Record] = []
     for row in rows:
@@ -140,7 +148,7 @@ class EurostatFetcher(BaseFetcher):
             params = {"format": "JSON", "lang": "EN",
                       "sinceTimePeriod": str(start_year), **filters}
             try:
-                data = self._get(api_code, params)
+                data = self._get(dataset_id(api_code), params)
             except Exception as exc:  # noqa: BLE001 — recorded, not swallowed
                 self.errors.append((api_code, str(exc)))
                 logger.warning("Eurostat %s failed: %s", api_code, exc)
