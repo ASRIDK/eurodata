@@ -59,6 +59,14 @@ class WorldBankFetcher(BaseFetcher):
         "IC.BUS.NREG": "IC.BUS.NREG",                  # New businesses registered
         "SL.EMP.SELF.ZS": "SL.EMP.SELF.ZS",            # Self-employed, % of employment
         "FS.AST.PRVT.GD.ZS": "FS.AST.PRVT.GD.ZS",      # Private sector credit, % GDP
+        # 2026-07-15: Health
+        "SH.XPD.CHEX.GD.ZS": "SH.XPD.CHEX.GD.ZS",  # Current health exp, % GDP
+        "SH.MED.PHYS.ZS": "SH.MED.PHYS.ZS",        # Physicians /1k
+        "SH.MED.BEDS.ZS": "SH.MED.BEDS.ZS",        # Hospital beds /1k
+        "SH.XPD.OOPC.CH.ZS": "SH.XPD.OOPC.CH.ZS",  # Out-of-pocket, % of CHE
+        "SH.IMM.MEAS": "SH.IMM.MEAS",              # Measles immunization %
+        "SP.DYN.IMRT.IN": "SP.DYN.IMRT.IN",        # Infant mortality /1k
+        "SH.STA.SUIC.P5": "SH.STA.SUIC.P5",        # Suicide mortality /100k
     }
 
     def fetch(self, start_year: int) -> list[Record]:

@@ -7,6 +7,9 @@ DOMAINS = [
     {"name": "Governance & Geopolitics", "description": "Memberships, policy and geopolitical events (event layer)", "color": "#E45756"},
     # --- added in v3 (append-only; ids are positional) ---
     {"name": "Startups & Business", "description": "Entrepreneurship, business demography, startup environment", "color": "#FF9DA6"},
+    # --- added 2026-07-15 (append-only; ids are positional) ---
+    {"name": "Health", "description": "Health spending, workforce, and outcomes", "color": "#9D755D"},
+    {"name": "Social Media", "description": "Social network use by individuals and enterprises", "color": "#BAB0AC"},
 ]
 
 # domain must match a DOMAINS name; api_code is the series key fetchers emit.
@@ -104,6 +107,28 @@ INDICATORS = [
     {"domain": "Economy", "name": "Unemployment Rate (monthly)", "unit": "%", "api_code": "DF_IALFS_UNE_M", "source_priority": 1,
      "frequency": "monthly",
      "definition": "Monthly unemployment rate, % of the labour force, seasonally adjusted, ages 15+ (OECD DSD_LFS@DF_IALFS_UNE_M); OECD member countries only."},
+    # --- added 2026-07-15: Health (World Bank; append-only, positional ids) ---
+    {"domain": "Health", "name": "Health Expenditure (% GDP)", "unit": "%", "api_code": "SH.XPD.CHEX.GD.ZS", "source_priority": 1,
+     "definition": "Current health expenditure, % of GDP (World Bank SH.XPD.CHEX.GD.ZS, from WHO Global Health Expenditure Database)."},
+    {"domain": "Health", "name": "Physicians", "unit": "per 1,000 people", "api_code": "SH.MED.PHYS.ZS", "source_priority": 1,
+     "definition": "Physicians per 1,000 people (World Bank SH.MED.PHYS.ZS, from WHO/OECD)."},
+    {"domain": "Health", "name": "Hospital Beds", "unit": "per 1,000 people", "api_code": "SH.MED.BEDS.ZS", "source_priority": 1,
+     "definition": "Hospital beds per 1,000 people (World Bank SH.MED.BEDS.ZS, from WHO/OECD/Eurostat)."},
+    {"domain": "Health", "name": "Out-of-pocket Health Spending", "unit": "% of health expenditure", "api_code": "SH.XPD.OOPC.CH.ZS", "source_priority": 1,
+     "definition": "Out-of-pocket expenditure, % of current health expenditure (World Bank SH.XPD.OOPC.CH.ZS, from WHO GHED)."},
+    {"domain": "Health", "name": "Measles Immunization", "unit": "% of children 12-23 months", "api_code": "SH.IMM.MEAS", "source_priority": 1,
+     "definition": "Immunization against measles, % of children ages 12-23 months (World Bank SH.IMM.MEAS, from WHO/UNICEF)."},
+    {"domain": "Health", "name": "Infant Mortality", "unit": "per 1,000 live births", "api_code": "SP.DYN.IMRT.IN", "source_priority": 1,
+     "definition": "Mortality rate, infant, per 1,000 live births (World Bank SP.DYN.IMRT.IN, UN IGME estimate)."},
+    {"domain": "Health", "name": "Suicide Mortality", "unit": "per 100,000 people", "api_code": "SH.STA.SUIC.P5", "source_priority": 1,
+     "definition": "Suicide mortality rate, per 100,000 population (World Bank SH.STA.SUIC.P5, from WHO); series ends ~2021 (WHO reporting lag)."},
+    # --- added 2026-07-15: Social Media (Eurostat; append-only, positional ids) ---
+    {"domain": "Social Media", "name": "Individuals in Social Networks", "unit": "%", "api_code": "isoc_ci_ac_i", "source_priority": 1,
+     "definition": "Individuals using the internet for participating in social networks, % of all individuals (Eurostat isoc_ci_ac_i, indic_is=I_IUSNET, ind_type=IND_TOTAL)."},
+    {"domain": "Social Media", "name": "Youth in Social Networks (16-24)", "unit": "%", "api_code": "isoc_ci_ac_i#Y16_24", "source_priority": 1,
+     "definition": "Individuals aged 16-24 using the internet for participating in social networks, % of that age group (Eurostat isoc_ci_ac_i, indic_is=I_IUSNET, ind_type=Y16_24)."},
+    {"domain": "Social Media", "name": "Enterprises Using Social Media", "unit": "%", "api_code": "isoc_cismt", "source_priority": 1,
+     "definition": "Enterprises (10+ persons employed, business economy) using any social media, % of enterprises (Eurostat isoc_cismt, indic_is=E_SM1_ANY, size_emp=GE10)."},
 ]
 
 SOURCES = [

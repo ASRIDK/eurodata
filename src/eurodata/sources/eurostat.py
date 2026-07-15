@@ -43,6 +43,17 @@ SERIES_PARAMS: dict[str, dict[str, str]] = {
     # GDP QUARTERLY, chain-linked volume % change vs same quarter of the
     # previous year, seasonally and calendar adjusted
     "namq_10_gdp": {"unit": "CLV_PCH_SM", "s_adj": "SCA", "na_item": "B1GQ"},
+    # 2026-07-15: Social Media (usage)
+    # Individuals participating in social networks, % of all individuals
+    "isoc_ci_ac_i": {"indic_is": "I_IUSNET", "unit": "PC_IND",
+                     "ind_type": "IND_TOTAL"},
+    # Same series for the 16-24 age group; shares the dataset via #-suffix
+    "isoc_ci_ac_i#Y16_24": {"indic_is": "I_IUSNET", "unit": "PC_IND",
+                            "ind_type": "Y16_24"},
+    # Enterprises (10+ employed) using any social media, % of enterprises;
+    # biennial coverage (2014, 2015, 2017, 2019, 2021, 2023, 2025)
+    "isoc_cismt": {"indic_is": "E_SM1_ANY", "unit": "PC_ENT",
+                   "size_emp": "GE10", "nace_r2": "C10-S951_X_K"},
 }
 
 
