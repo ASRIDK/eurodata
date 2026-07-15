@@ -389,8 +389,8 @@ class EuroData:
 
         hist_out = hist[["t", "period", "value"]].copy()
         hist_out["kind"] = "history"
-        hist_out["lo"] = pd.NA
-        hist_out["hi"] = pd.NA
+        hist_out["lo"] = np.nan
+        hist_out["hi"] = np.nan
         out = pd.concat([hist_out, pd.DataFrame(fc_rows)], ignore_index=True)
         out.attrs.update({
             "method": res.method, "freq": res.freq,
