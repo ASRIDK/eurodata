@@ -85,3 +85,18 @@ def test_correlation_graph():
     focused = client.get("/api/correlation-graph", params={"indicator": "GDP"}).json()["rows"]
     assert focused
     assert all("GDP" in (r["indicator_a"], r["indicator_b"]) for r in focused)
+
+
+def test_indicator_trend():
+    rows = client.get("/api/indicator-trend", params={
+        "indicators": "GDP per capita,Internet Users %",
+    }).json()["rows"]
+    assert rows and {"indicator", "year", "value", "n_countries", "base_year"} <= set(rows[0])
+    names = {r["indicator"] for r in rows}
+    assert names == {"GDP per capita", "Internet Users %"}
+    # Rebased: every indicator sits at exactly 100 in the shared base year.
+    base_year = rows[0]["base_year"]
+    at_base = [r["value"] for r in rows if r["year"] == base_year]
+    assert len(at_base) == 2 and all(abs(v - 100.0) < 1e-9 for v in at_base)
+
+    assert client.get("/api/indicator-trend", params={"indicators": " , "}).status_code == 422

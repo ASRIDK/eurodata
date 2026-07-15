@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-import { api, type Row } from "@/lib/api";
+import { BlockChart } from "@/components/block-chart";
+import { api, type ChartSpec, type Row } from "@/lib/api";
 
 const TOP_OPTIONS = [20, 50, 100, "All"] as const;
 
@@ -124,37 +125,125 @@ function CorrelationCard({ row }: { row: Row }) {
   const positive = weight >= 0;
   const pct = Math.min(100, Math.round(Math.abs(weight) * 100));
 
+  const [open, setOpen] = useState(false);
+
   return (
-    <div className="rounded-2xl border border-black/10 px-4 py-3 dark:border-white/10">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <div className="text-sm font-medium">
-          {a} <span className="text-black/40 dark:text-white/40">{arrow}</span> {b}
+    <div className="rounded-2xl border border-black/10 dark:border-white/10">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full rounded-2xl px-4 py-3 text-left transition-colors hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+      >
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <div className="flex items-center gap-1.5 text-sm font-medium">
+            <span
+              className={`text-black/30 transition-transform dark:text-white/30 ${open ? "rotate-90" : ""}`}
+              aria-hidden
+            >
+              ▸
+            </span>
+            <span>
+              {a} <span className="text-black/40 dark:text-white/40">{arrow}</span> {b}
+            </span>
+          </div>
+          <span
+            className={
+              positive
+                ? "text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400"
+                : "text-sm font-semibold tabular-nums text-red-600 dark:text-red-400"
+            }
+          >
+            {positive ? "+" : ""}
+            {weight.toFixed(3)}
+          </span>
         </div>
-        <span
-          className={
-            positive
-              ? "text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400"
-              : "text-sm font-semibold tabular-nums text-red-600 dark:text-red-400"
-          }
-        >
-          {positive ? "+" : ""}
-          {weight.toFixed(3)}
-        </span>
-      </div>
 
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
-        <div
-          className={positive ? "h-full rounded-full bg-emerald-500" : "h-full rounded-full bg-red-500"}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+          <div
+            className={positive ? "h-full rounded-full bg-emerald-500" : "h-full rounded-full bg-red-500"}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
 
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-black/50 dark:text-white/50">
-        <span>{domainA === domainB ? domainA : `${domainA} × ${domainB}`}</span>
-        <span>· {lagLabel}</span>
-        <span>· q={qValue < 0.0001 ? "<0.0001" : qValue.toFixed(4)}</span>
-        <span>· {nCountries} countries</span>
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-black/50 dark:text-white/50">
+          <span>{domainA === domainB ? domainA : `${domainA} × ${domainB}`}</span>
+          <span>· {lagLabel}</span>
+          <span>· q={qValue < 0.0001 ? "<0.0001" : qValue.toFixed(4)}</span>
+          <span>· {nCountries} countries</span>
+        </div>
+      </button>
+
+      {open ? (
+        <div className="border-t border-black/10 px-4 py-3 dark:border-white/10">
+          <TrendComparison a={a} b={b} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TrendComparison({ a, b }: { a: string; b: string }) {
+  const [rows, setRows] = useState<Row[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRows(null);
+    setError(null);
+    const params = new URLSearchParams({ indicators: `${a},${b}` });
+    api<{ rows: Row[] }>(`/api/indicator-trend?${params}`)
+      .then((r) => {
+        if (!cancelled) setRows(r.rows);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [a, b]);
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs">
+        {error}
       </div>
+    );
+  }
+  if (rows === null) {
+    return <p className="text-xs text-black/50 dark:text-white/50">Loading trend…</p>;
+  }
+  if (!rows.length) {
+    return (
+      <p className="text-xs text-black/50 dark:text-white/50">
+        No overlapping years to chart for this pair.
+      </p>
+    );
+  }
+
+  const baseYear = rows[0]?.base_year;
+  const build = (name: string) => ({
+    name,
+    points: rows
+      .filter((r) => r.indicator === name)
+      .map((r) => ({ x: Number(r.year), y: r.value as number | null })),
+  });
+  const spec: ChartSpec = {
+    kind: "line",
+    unit: `European median · indexed to 100 at ${baseYear}`,
+    title: null,
+    series: [build(a), build(b)],
+  };
+
+  return (
+    <div>
+      <BlockChart spec={spec} />
+      <p className="mt-1 text-xs text-black/40 dark:text-white/40">
+        Cross-country median for each indicator, rebased so both start at 100 —
+        the shape shows how they move together (or apart) over time, not their
+        real units.
+      </p>
     </div>
   );
 }

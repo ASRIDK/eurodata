@@ -37,7 +37,7 @@ export function Navbar() {
           </Link>
         ))}
         <span className="ml-auto hidden text-xs text-black/40 sm:block dark:text-white/40">
-          European data intelligence
+          European data
         </span>
       </nav>
     </header>

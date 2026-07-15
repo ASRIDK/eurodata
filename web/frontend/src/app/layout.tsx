@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "European Data",
   description:
-    "Open-source European data intelligence: 26 indicators, 50 countries, curated events, and an AI analyst.",
+    "Open-source European data: 26 indicators, 50 countries, curated events, and an AI analyst.",
 };
 
 export default function RootLayout({
