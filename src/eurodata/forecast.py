@@ -73,8 +73,10 @@ def _holt(y: np.ndarray, h: int, alpha: float = 0.5, beta: float = 0.3) -> np.nd
     return level + trend * np.arange(1, h + 1)
 
 
-# (name, fn, seasonal). Simplicity order = tie-break order. Task 2 appends
-# the seasonal models.
+# (name, fn, seasonal), in simplicity order. ``_better()`` uses this order to
+# break genuine ties among fitted models, but drift (the naive baseline)
+# never wins a near-tie against a fitted model. Task 2 appends the seasonal
+# models.
 _MODELS: list[tuple[str, Callable[..., np.ndarray], bool]] = [
     ("drift", _drift, False),
     ("linear", _linear, False),
@@ -141,6 +143,8 @@ def forecast_values(y: np.ndarray, *, horizon: int, freq: int = 1,
                     level: float = 0.8) -> ForecastResult:
     y = np.asarray(y, dtype=float)
     n = len(y)
+    if n == 0:
+        raise ValueError("cannot forecast an empty series")
     if horizon < 1:
         raise ValueError("horizon must be >= 1")
     if not 0 < level < 1:
