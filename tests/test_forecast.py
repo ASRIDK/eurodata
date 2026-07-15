@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from eurodata.forecast import ForecastResult, _better, forecast_values
+from eurodata._forecast import ForecastResult, _better, forecast_values
 
 
 def test_linear_series_picks_linear_and_extrapolates():
