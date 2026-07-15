@@ -79,6 +79,16 @@ def correlation_graph(indicator: str | None = None) -> dict:
     return {"rows": df_records(_query("correlation_graph", indicator=indicator))}
 
 
+@app.get("/api/indicator-trend")
+def indicator_trend(indicators: str, start: int | None = None,
+                    end: int | None = None) -> dict:
+    names = [s.strip() for s in indicators.split(",") if s.strip()]
+    if not names:
+        raise HTTPException(422, "indicators must be a comma-separated list")
+    df = _query("indicator_trends", indicators=names, start=start, end=end)
+    return {"rows": df_records(df)}
+
+
 @app.get("/api/search")
 def search(q: str) -> dict:
     return {"rows": df_records(_query("search_indicators", text=q))}
