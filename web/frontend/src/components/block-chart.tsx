@@ -151,12 +151,17 @@ export function BlockChart({
     );
   }
 
-  const byX = new Map<number | string, Record<string, number | string | null>>();
+  const byX = new Map<number | string, Record<string, number | string | null | [number, number]>>();
   for (const s of spec.series) {
     for (const p of s.points) {
       const row = byX.get(p.x) ?? { x: p.x };
       row[s.name] = p.y;
       byX.set(p.x, row);
+    }
+    for (const b of s.band ?? []) {
+      const row = byX.get(b.x) ?? { x: b.x };
+      row[`${s.name}__band`] = [b.lo, b.hi];
+      byX.set(b.x, row);
     }
   }
   // String-aware sort: x may be a year (2020) or a period label ("2020-Q1",
@@ -175,23 +180,40 @@ export function BlockChart({
         <Tooltip formatter={(v, name) => [compactNumber(v), <FlagName key="n" value={name} />]} />
         <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => <FlagName value={v} />} />
         {spec.series.map((s, i) =>
+          s.band ? (
+            <Area
+              key={`${s.name}__band`}
+              dataKey={`${s.name}__band`}
+              stroke="none"
+              fill={s.color ?? COLORS[i % COLORS.length]}
+              fillOpacity={0.12}
+              legendType="none"
+              tooltipType="none"
+              connectNulls
+              isAnimationActive={false}
+            />
+          ) : null,
+        )}
+        {spec.series.map((s, i) =>
           spec.kind === "area" ? (
             <Area
               key={s.name}
               dataKey={s.name}
-              stroke={COLORS[i % COLORS.length]}
-              fill={COLORS[i % COLORS.length]}
+              stroke={s.color ?? COLORS[i % COLORS.length]}
+              fill={s.color ?? COLORS[i % COLORS.length]}
               fillOpacity={0.15}
               strokeWidth={2}
+              strokeDasharray={s.dashed ? "5 4" : undefined}
               connectNulls
             />
           ) : (
             <Line
               key={s.name}
               dataKey={s.name}
-              stroke={COLORS[i % COLORS.length]}
+              stroke={s.color ?? COLORS[i % COLORS.length]}
               dot={false}
               strokeWidth={2}
+              strokeDasharray={s.dashed ? "5 4" : undefined}
               connectNulls
             />
           ),
