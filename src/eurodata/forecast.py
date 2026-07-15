@@ -73,15 +73,59 @@ def _holt(y: np.ndarray, h: int, alpha: float = 0.5, beta: float = 0.3) -> np.nd
     return level + trend * np.arange(1, h + 1)
 
 
+def _seasonal_naive(y: np.ndarray, h: int, m: int) -> np.ndarray:
+    """Repeat the last full season, plus a linear drift between the last two
+    seasons (so a trending-and-seasonal series doesn't flatten out)."""
+    season = y[-m:]
+    reps = int(np.ceil(h / m))
+    base = np.tile(season, reps)[:h]
+    drift = float(y[-m:].mean() - y[-2 * m:-m].mean()) if len(y) >= 2 * m else 0.0
+    step = ((np.arange(h) // m) + 1) * drift
+    return base + step
+
+
+def _holt_winters(y: np.ndarray, h: int, m: int,
+                  alpha: float = 0.4, beta: float = 0.1,
+                  gamma: float = 0.3) -> np.ndarray:
+    """Additive Holt-Winters: level + trend + seasonal index, updated
+    exponentially each step. ``seasons`` grows by one entry per observation
+    (indices 0..m-1 seeded from the first season, m..n+m-1 updated in the
+    loop), so index ``i`` and index ``i + m`` always refer to the same phase
+    of the season."""
+    n = len(y)
+    level = float(y[:m].mean())
+    trend = float((y[m:2 * m].mean() - y[:m].mean()) / m) if n >= 2 * m else 0.0
+    seasons = list(np.asarray(y[:m], dtype=float) - level)  # indices 0..m-1
+    for i in range(n):
+        s = seasons[i]
+        prev = level
+        level = alpha * (y[i] - s) + (1 - alpha) * (level + trend)
+        trend = beta * (level - prev) + (1 - beta) * trend
+        seasons.append(gamma * (y[i] - level) + (1 - gamma) * s)  # index i+m
+    # seasons now has length m + n; future position p = n+step-1 maps to
+    # index n + ((step-1) % m), always valid.
+    return np.array([
+        level + step * trend + seasons[n + ((step - 1) % m)]
+        for step in range(1, h + 1)
+    ])
+
+
 # (name, fn, seasonal), in simplicity order. ``_better()`` uses this order to
 # break genuine ties among fitted models, but drift (the naive baseline)
-# never wins a near-tie against a fitted model. Task 2 appends the seasonal
-# models.
+# never wins a near-tie against a fitted model.
 _MODELS: list[tuple[str, Callable[..., np.ndarray], bool]] = [
     ("drift", _drift, False),
     ("linear", _linear, False),
     ("log_linear", _log_linear, False),
     ("holt", _holt, False),
+]
+
+# Seasonal models take an extra ``m`` (season length) argument, so they can't
+# live in ``_MODELS`` directly — ``forecast_values`` binds ``m = freq`` via a
+# closure and appends them to the candidate list at selection time.
+_SEASONAL_MODELS: list[tuple[str, Callable[..., np.ndarray]]] = [
+    ("seasonal_naive", _seasonal_naive),
+    ("holt_winters", _holt_winters),
 ]
 
 
@@ -157,8 +201,17 @@ def forecast_values(y: np.ndarray, *, horizon: int, freq: int = 1,
         name, fn = "drift", _drift
         errs = _one_step_errors(_drift, y, k, min_hist=2)
     else:
+        candidates: list[tuple[str, Callable[[np.ndarray, int], np.ndarray], bool]] = [
+            (name_i, fn_i, seasonal_i) for name_i, fn_i, seasonal_i in _MODELS
+        ]
+        if freq > 1:
+            for name_i, fn_i in _SEASONAL_MODELS:
+                candidates.append(
+                    (name_i, (lambda f: lambda yy, hh: f(yy, hh, freq))(fn_i), True)
+                )
+
         best = None  # (mae, simplicity_index, name, fn, errs)
-        for idx, (name_i, fn_i, seasonal) in enumerate(_MODELS):
+        for idx, (name_i, fn_i, seasonal) in enumerate(candidates):
             if seasonal and n < 2 * freq:
                 continue
             if not _usable(name_i, y, freq):
