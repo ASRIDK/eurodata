@@ -25,8 +25,8 @@ def test_build_graph_creates_nodes_and_edges():
     node_types = dict(con.execute(
         "SELECT node_type, COUNT(*) FROM graph_node GROUP BY node_type").fetchall())
     assert node_types["country"] >= 40
-    assert node_types["indicator"] == 37
-    assert node_types["domain"] == 7
+    assert node_types["indicator"] == 47
+    assert node_types["domain"] == 9
     edge_types = {r[0] for r in con.execute("SELECT DISTINCT edge_type FROM graph_edge").fetchall()}
     assert {"MEMBER_OF", "BORDERS", "BELONGS_TO", "PROVIDES"} <= edge_types
     # PROVIDES mirrors ingested data: exactly one source/indicator pair here.
