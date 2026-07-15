@@ -80,6 +80,61 @@ export default function Explore() {
     return c.length ? c[c.length - 1] : null;
   });
 
+  // Per-country first/last non-null points, in the API's chronological order,
+  // used to detail the situation two extra ways: a current-value ranking and
+  // the net change over each country's covered span.
+  const perCountry = selected
+    .map((iso) => {
+      const pts = rows.filter((r) => r.iso3 === iso && r.value !== null);
+      return {
+        iso,
+        country: String(pts[0]?.country ?? iso),
+        first: pts[0] ?? null,
+        last: pts[pts.length - 1] ?? null,
+      };
+    })
+    .filter((c) => c.last !== null);
+
+  const latestYear = perCountry.length
+    ? Math.max(...perCountry.map((c) => Number(c.last!.year)))
+    : null;
+
+  const rankSpec: ChartSpec | null = perCountry.length
+    ? {
+        kind: "bar",
+        unit,
+        title: latestYear ? `Latest value — ${latestYear}` : "Latest value",
+        series: [
+          {
+            name: indicator,
+            points: [...perCountry]
+              .sort((a, b) => Number(b.last!.value) - Number(a.last!.value))
+              .map((c) => ({ x: c.iso, y: c.last!.value as number })),
+          },
+        ],
+      }
+    : null;
+
+  const changeSpec: ChartSpec | null = perCountry.some((c) => c.first !== c.last)
+    ? {
+        kind: "bar",
+        unit,
+        title: "Net change over available years",
+        series: [
+          {
+            name: "change",
+            points: perCountry.map((c) => ({
+              x: c.iso,
+              y:
+                c.first && c.last
+                  ? (c.last.value as number) - (c.first.value as number)
+                  : null,
+            })),
+          },
+        ],
+      }
+    : null;
+
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
       <h1 className="text-2xl font-semibold tracking-tight">Explore</h1>
@@ -147,6 +202,12 @@ export default function Explore() {
             ) : null}
             {meta?.definition ? <div className="mt-1">{String(meta.definition)}</div> : null}
           </div>
+          {rankSpec || changeSpec ? (
+            <div className="grid gap-6 sm:grid-cols-2">
+              {rankSpec ? <BlockChart spec={rankSpec} horizontal /> : null}
+              {changeSpec ? <BlockChart spec={changeSpec} /> : null}
+            </div>
+          ) : null}
           <DataTable
             columns={["country", "latest year", "value", "unit"]}
             rows={latestByCountry
