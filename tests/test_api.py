@@ -222,3 +222,13 @@ def test_forecast_extends_monthly_series(ed):
     assert months.between(1, 12).all()
     assert fc["t"].min() > hist["t"].max()
     assert fc["period"].min() > hist["period"].max()
+
+
+def test_module_level_forecast_delegate():
+    import eurodata as ed_pkg
+    from pathlib import Path
+    if not Path("data/eurodata.duckdb").exists():
+        import pytest; pytest.skip("requires the built database")
+    df = ed_pkg.forecast("GDP per capita", "FRA", horizon=2)
+    assert callable(ed_pkg.forecast)
+    assert (df["kind"] == "forecast").sum() == 2

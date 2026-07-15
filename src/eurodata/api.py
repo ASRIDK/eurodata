@@ -26,7 +26,7 @@ import pandas as pd
 
 from eurodata.config import get_settings
 from eurodata.db import connect as _connect
-from eurodata.forecast import forecast_values
+from eurodata._forecast import forecast_values
 
 
 class EuroDataLookupError(LookupError):
