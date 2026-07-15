@@ -471,6 +471,54 @@ class EuroData:
         return pd.DataFrame(out)
 
     # -- correlations -----------------------------------------------------
+    def indicator_trends(self, indicators: list[str], *,
+                         start: int | None = None, end: int | None = None,
+                         rebase: bool = True) -> pd.DataFrame:
+        """Pan-European annual trend per indicator, for visual comparison
+        (e.g. the two sides of a `CORRELATES_WITH` edge, on one chart).
+
+        Each indicator is annualized per country (`_indicator_frame`) and
+        reduced to the cross-country *median* per year — an equal-weight
+        European trend, robust to individual outliers and consistent with the
+        pooled correlation methodology. When ``rebase`` (default), every
+        indicator is indexed to 100 at the first calendar year for which *all*
+        requested indicators have data, so series carrying different units
+        share a single axis.
+
+        Columns: indicator, year, value (indexed to 100 when rebased, else the
+        raw median), n_countries, base_year. Empty if the indicators never
+        share a year, or any requested indicator has no data in range.
+        """
+        frames: dict[str, pd.DataFrame] = {}
+        for name in indicators:
+            f = self._indicator_frame(name)
+            if start is not None:
+                f = f[f["year"] >= start]
+            if end is not None:
+                f = f[f["year"] <= end]
+            if f.empty:
+                continue
+            agg = (f.groupby("year")
+                    .agg(value=("value", "median"), n_countries=("iso3", "nunique"))
+                    .reset_index())
+            agg["indicator"] = name
+            frames[name] = agg
+        cols = ["indicator", "year", "value", "n_countries", "base_year"]
+        if len(frames) < len(indicators):
+            return pd.DataFrame(columns=cols)
+        common = set.intersection(*(set(f["year"]) for f in frames.values()))
+        if not common:
+            return pd.DataFrame(columns=cols)
+        base_year = min(common)
+        out = pd.concat(frames.values(), ignore_index=True)
+        out["base_year"] = base_year
+        if rebase:
+            bases = out[out["year"] == base_year].set_index("indicator")["value"]
+            out["value"] = out.apply(
+                lambda r: r["value"] / bases[r["indicator"]] * 100.0
+                if bases[r["indicator"]] else None, axis=1)
+        return out.sort_values(["indicator", "year"]).reset_index(drop=True)[cols]
+
     def _indicator_frame(self, indicator: str) -> pd.DataFrame:
         """One value per (country, year); sub-annual series are annualized
         (mean) so correlations always align on calendar years."""
@@ -564,6 +612,7 @@ event_types = _delegate("event_types")
 event_study = _delegate("event_study")
 correlate = _delegate("correlate")
 lagged_correlation = _delegate("lagged_correlation")
+indicator_trends = _delegate("indicator_trends")
 query = _delegate("query")
 relation = _delegate("relation")
 
@@ -572,5 +621,6 @@ __all__ = [
     "countries", "blocs", "bloc_members", "domains", "indicators", "sources",
     "years", "search_indicators", "series", "latest", "compare", "coverage",
     "ingestion_summary", "events", "event_types", "event_study",
-    "correlate", "lagged_correlation", "correlation_graph", "query", "relation",
+    "correlate", "lagged_correlation", "indicator_trends", "correlation_graph",
+    "query", "relation",
 ]
