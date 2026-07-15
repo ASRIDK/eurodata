@@ -7,6 +7,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Legend,
   Line,
   LineChart,
@@ -170,7 +171,8 @@ export function BlockChart({
     String(a.x).localeCompare(String(b.x), "en", { numeric: true }),
   );
 
-  const Chart = spec.kind === "area" ? AreaChart : LineChart;
+  const hasBand = spec.series.some((s) => s.band && s.band.length > 0);
+  const Chart = spec.kind === "area" ? AreaChart : hasBand ? ComposedChart : LineChart;
   return (
     <ChartFrame unit={spec.unit} title={spec.title}>
       <Chart data={data} margin={{ left: 8, right: 8 }}>
