@@ -21,10 +21,12 @@ from difflib import get_close_matches
 from pathlib import Path
 
 import duckdb
+import numpy as np
 import pandas as pd
 
 from eurodata.config import get_settings
 from eurodata.db import connect as _connect
+from eurodata.forecast import forecast_values
 
 
 class EuroDataLookupError(LookupError):
@@ -345,6 +347,59 @@ class EuroData:
         index = "year" if long["period"].nunique() == long["year"].nunique() else "period"
         return long.pivot_table(index=index, columns="iso3", values="value")
 
+    def forecast(self, indicator: str, country: str, *, horizon: int = 5,
+                 level: float = 0.8) -> pd.DataFrame:
+        """Project one indicator/country series ``horizon`` periods forward.
+
+        Auto-selects a simple model (drift / linear / log-linear / Holt, plus
+        seasonal models for sub-annual series) by one-step backtest error and
+        returns history + forecast rows with an empirical ``lo``/``hi`` band.
+        This is trend extrapolation, not prediction — see ``df.attrs['disclaimer']``.
+        """
+        hist = self.series(indicator=indicator, country=country)
+        hist = hist[hist["value"].notna()].sort_values("t").reset_index(drop=True)
+        if hist.empty:
+            raise EuroDataLookupError(
+                f"No data to forecast for {indicator!r} in {country!r}.")
+        # single frequency: infer from the sub-annual columns
+        if hist["month"].notna().any():
+            freq, step = 12, 1.0 / 12.0
+        elif hist["quarter"].notna().any():
+            freq, step = 4, 0.25
+        else:
+            freq, step = 1, 1.0
+
+        res = forecast_values(hist["value"].to_numpy(), horizon=horizon,
+                              freq=freq, level=level)
+
+        last_t = float(hist["t"].iloc[-1])
+        unit = hist["unit"].iloc[0] if "unit" in hist else None
+        fc_rows = []
+        for i, p in enumerate(res.points, start=1):
+            t = last_t + step * i
+            year = int(np.floor(t + 1e-9))
+            if freq == 12:
+                period = f"{year}-{int(round((t - year) * 12)) + 1:02d}"
+            elif freq == 4:
+                period = f"{year}-Q{int(round((t - year) * 4)) + 1}"
+            else:
+                period = str(year)
+            fc_rows.append({"t": t, "period": period, "value": p.yhat,
+                            "kind": "forecast", "lo": p.lo, "hi": p.hi})
+
+        hist_out = hist[["t", "period", "value"]].copy()
+        hist_out["kind"] = "history"
+        hist_out["lo"] = pd.NA
+        hist_out["hi"] = pd.NA
+        out = pd.concat([hist_out, pd.DataFrame(fc_rows)], ignore_index=True)
+        out.attrs.update({
+            "method": res.method, "freq": res.freq,
+            "backtest_mae": res.backtest_mae, "fallback": res.fallback,
+            "n_obs": res.n_obs, "disclaimer": res.disclaimer,
+            "unit": unit, "indicator": indicator, "country": country,
+        })
+        return out
+
     def coverage(self, indicator: str | None = None) -> pd.DataFrame:
         """Rows / countries / year span per indicator; empty indicators included."""
         where, params = "", []
@@ -605,6 +660,7 @@ search_indicators = _delegate("search_indicators")
 series = _delegate("series")
 latest = _delegate("latest")
 compare = _delegate("compare")
+forecast = _delegate("forecast")
 coverage = _delegate("coverage")
 ingestion_summary = _delegate("ingestion_summary")
 events = _delegate("events")
@@ -619,7 +675,7 @@ relation = _delegate("relation")
 __all__ = [
     "EuroData", "EuroDataLookupError", "open",
     "countries", "blocs", "bloc_members", "domains", "indicators", "sources",
-    "years", "search_indicators", "series", "latest", "compare", "coverage",
+    "years", "search_indicators", "series", "latest", "compare", "forecast", "coverage",
     "ingestion_summary", "events", "event_types", "event_study",
     "correlate", "lagged_correlation", "indicator_trends", "correlation_graph",
     "query", "relation",
