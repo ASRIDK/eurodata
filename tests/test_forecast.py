@@ -65,3 +65,24 @@ def test_better_lets_drift_win_when_it_clearly_beats_fitted_models():
 def test_empty_series_raises():
     with pytest.raises(ValueError):
         forecast_values(np.array([]), horizon=2)
+
+
+def test_seasonal_series_prefers_a_seasonal_model():
+    # 6 years of monthly data: linear trend + strong 12-month season
+    n = 72
+    t = np.arange(n)
+    season = 10.0 * np.sin(2 * np.pi * t / 12.0)
+    y = 100.0 + 0.5 * t + season
+    res = forecast_values(y, horizon=12, freq=12, level=0.8)
+    assert res.method in ("seasonal_naive", "holt_winters")
+    assert len(res.points) == 12
+    # forecast should reproduce the seasonal swing, not a flat line
+    yhats = np.array([p.yhat for p in res.points])
+    assert yhats.max() - yhats.min() > 8.0
+
+
+def test_seasonal_models_skipped_when_too_short():
+    # only 1.5 seasons of monthly data -> seasonal models ineligible
+    y = 100.0 + np.arange(18, dtype=float)
+    res = forecast_values(y, horizon=3, freq=12)
+    assert res.method in ("drift", "linear", "log_linear", "holt")
