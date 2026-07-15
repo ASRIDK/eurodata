@@ -144,3 +144,14 @@ def test_chat_endpoint_rejects_empty():
     client = TestClient(app)
     r = client.post("/api/chat", json={"messages": []})
     assert r.status_code == 422
+
+
+def test_forecast_tool_returns_method_and_disclaimer(ed):
+    out = execute_tool(ed, "forecast",
+                       {"indicator": "GDP per capita", "country": "FRA",
+                        "horizon": 3})
+    assert "error" not in out.payload
+    assert out.payload["method"] in (
+        "drift", "linear", "log_linear", "holt", "seasonal_naive", "holt_winters")
+    assert "not a prediction" in out.payload["disclaimer"].lower()
+    assert len(out.payload["forecast"]) == 3

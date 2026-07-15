@@ -189,3 +189,46 @@ def test_module_level_delegation_docs():
     # Module-level wrappers exist and carry the method docstrings.
     assert ed.series.__doc__ and "Time series" in ed.series.__doc__
     assert ed.event_study.__name__ == "event_study"
+
+
+def test_forecast_extends_annual_series(ed):
+    df = ed.forecast("GDP per capita", "FRA", horizon=3)
+    hist = df[df["kind"] == "history"]
+    fc = df[df["kind"] == "forecast"]
+    assert len(fc) == 3
+    assert len(hist) > 0
+    # forecast t values continue past the last history t
+    assert fc["t"].min() > hist["t"].max()
+    # band present on forecast rows, absent on history
+    assert fc["lo"].notna().all() and fc["hi"].notna().all()
+    assert hist["lo"].isna().all()
+    # metadata
+    assert df.attrs["method"] in (
+        "drift", "linear", "log_linear", "holt", "seasonal_naive", "holt_winters")
+    assert "not a prediction" in df.attrs["disclaimer"].lower()
+    assert df.attrs["country"] == "FRA"
+
+
+def test_forecast_extends_monthly_series(ed):
+    df = ed.forecast("Inflation (HICP, monthly)", "FRA", horizon=3)
+    hist = df[df["kind"] == "history"]
+    fc = df[df["kind"] == "forecast"]
+    assert len(fc) == 3
+    assert df.attrs["freq"] == 12
+    # period labels look like YYYY-MM with a valid month, and continue
+    # chronologically past the last history period (covers year rollover)
+    assert fc["period"].str.match(r"^\d{4}-\d{2}$").all()
+    months = fc["period"].str.slice(5, 7).astype(int)
+    assert months.between(1, 12).all()
+    assert fc["t"].min() > hist["t"].max()
+    assert fc["period"].min() > hist["period"].max()
+
+
+def test_module_level_forecast_delegate():
+    import eurodata as ed_pkg
+    from pathlib import Path
+    if not Path("data/eurodata.duckdb").exists():
+        import pytest; pytest.skip("requires the built database")
+    df = ed_pkg.forecast("GDP per capita", "FRA", horizon=2)
+    assert callable(ed_pkg.forecast)
+    assert (df["kind"] == "forecast").sum() == 2
