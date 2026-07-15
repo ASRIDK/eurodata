@@ -109,28 +109,36 @@ export default function Explore() {
     "#2563eb", "#dc2626", "#16a34a", "#9333ea",
     "#ea580c", "#0891b2", "#ca8a04", "#db2777",
   ];
+  const colorByIso = new Map(selected.map((iso, i) => [iso, COLORS[i % COLORS.length]]));
   const specWithForecast: ChartSpec | null =
     spec && showForecast
       ? {
           ...spec,
-          series: [
-            ...spec.series.map((s, i) => ({ ...s, color: COLORS[i % COLORS.length] })),
-            ...selected.flatMap((iso, i) => {
-              const f = forecasts[iso];
-              if (!f) return [];
-              const hist = rows.filter((r) => r.iso3 === iso && r.value !== null);
-              const lastX = hist.length ? (hist[hist.length - 1].year as number) : null;
-              const lastY = hist.length ? (hist[hist.length - 1].value as number) : null;
-              const color = COLORS[i % COLORS.length];
-              // include the last history point so the dashed line connects
-              const points = [
-                ...(lastX !== null ? [{ x: lastX, y: lastY }] : []),
-                ...f.forecast.map((p) => ({ x: p.t, y: p.value })),
-              ];
-              const band = f.forecast.map((p) => ({ x: p.t, lo: p.lo, hi: p.hi }));
-              return [{ name: `${iso} forecast`, points, dashed: true, color, band }];
-            }),
-          ],
+          series: selected.flatMap((iso) => {
+            const histPts = rows
+              .filter((r) => r.iso3 === iso && r.value !== null)
+              .map((r) => ({ x: r.year as number, y: r.value as number }));
+            if (!histPts.length) return [];
+            const color = colorByIso.get(iso)!;
+            const name = String(rows.find((r) => r.iso3 === iso)?.country ?? iso);
+            const historySeries = { name, points: histPts, color };
+
+            const f = forecasts[iso];
+            if (!f) return [historySeries];
+
+            const last = histPts[histPts.length - 1];
+            // include the last history point so the dashed line connects
+            const points = [last, ...f.forecast.map((p) => ({ x: p.t, y: p.value }))];
+            const band = f.forecast.map((p) => ({ x: p.t, lo: p.lo, hi: p.hi }));
+            const forecastSeries = {
+              name: `${iso} forecast`,
+              points,
+              dashed: true,
+              color,
+              band,
+            };
+            return [historySeries, forecastSeries];
+          }),
         }
       : spec;
 
