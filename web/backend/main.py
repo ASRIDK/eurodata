@@ -112,6 +112,29 @@ def series(indicator: str | None = None, country: str | None = None,
     return {"rows": df_records(df, limit)}
 
 
+@app.get("/api/forecast")
+def forecast(indicator: str, country: str, horizon: int = 5,
+             level: float = 0.8) -> dict:
+    if not 1 <= horizon <= 30:
+        raise HTTPException(422, "horizon must be between 1 and 30")
+    if not 0 < level < 1:
+        raise HTTPException(422, "level must be between 0 and 1 (exclusive)")
+    df = _query("forecast", indicator=indicator, country=country,
+                horizon=horizon, level=level)
+    hist = df[df["kind"] == "history"]
+    fc = df[df["kind"] == "forecast"]
+    return {
+        "history": df_records(hist[["t", "period", "value"]]),
+        "forecast": df_records(fc[["t", "period", "value", "lo", "hi"]]),
+        "method": df.attrs["method"],
+        "freq": df.attrs["freq"],
+        "backtest_mae": df.attrs["backtest_mae"],
+        "fallback": df.attrs["fallback"],
+        "disclaimer": df.attrs["disclaimer"],
+        "unit": df.attrs["unit"],
+    }
+
+
 @app.get("/api/compare")
 def compare(countries: str, indicator: str,
             start: int | None = None, end: int | None = None) -> dict:
