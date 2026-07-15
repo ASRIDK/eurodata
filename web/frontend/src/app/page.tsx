@@ -28,6 +28,7 @@ const ROADMAP = [
   },
   {
     title: "More domains",
+    href: "/explore",
     body: "Health, AI & Innovation, Startups & Investment, and Social Media.",
   },
   {
@@ -67,7 +68,7 @@ export default function Home() {
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10">
       <h1 className="text-3xl font-semibold tracking-tight">
-        European data intelligence
+        European data
       </h1>
       <p className="mt-2 max-w-2xl text-black/60 dark:text-white/60">
         Official statistics on economy, demographics, digital, energy &amp;
