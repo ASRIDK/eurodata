@@ -34,7 +34,13 @@ export type ChartSpec = {
   kind: "line" | "bar" | "area" | "scatter" | "pie";
   unit: string | null;
   title?: string | null;
-  series: { name: string; points: { x: number | string; y: number | null }[] }[];
+  series: {
+    name: string;
+    points: { x: number | string; y: number | null }[];
+    dashed?: boolean;
+    color?: string;
+    band?: { x: number | string; lo: number; hi: number }[];
+  }[];
 };
 
 export type SourceItem = {
