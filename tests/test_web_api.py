@@ -80,6 +80,13 @@ def test_forecast_route_rejects_bad_horizon():
     assert r.status_code == 422
 
 
+def test_forecast_route_rejects_bad_level():
+    r = client.get("/api/forecast",
+                   params={"indicator": "GDP per capita", "country": "FRA",
+                           "level": 1.5})
+    assert r.status_code == 422
+
+
 def test_events_filter():
     rows = client.get("/api/events", params={"since": "2020-01-01"}).json()["rows"]
     assert rows and all(str(r["start_date"]) >= "2020-01-01" for r in rows)

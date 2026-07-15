@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from eurodata import EuroDataLookupError
 from web.backend import deps
 from web.backend.chat import ChatNotConfiguredError, run_chat
-from web.backend.tools import df_records
+from web.backend.tools import _clean, df_records
 
 app = FastAPI(title="eurodata API", version="0.1.0")
 
@@ -126,12 +126,12 @@ def forecast(indicator: str, country: str, horizon: int = 5,
     return {
         "history": df_records(hist[["t", "period", "value"]]),
         "forecast": df_records(fc[["t", "period", "value", "lo", "hi"]]),
-        "method": df.attrs["method"],
-        "freq": df.attrs["freq"],
-        "backtest_mae": df.attrs["backtest_mae"],
-        "fallback": df.attrs["fallback"],
-        "disclaimer": df.attrs["disclaimer"],
-        "unit": df.attrs["unit"],
+        "method": _clean(df.attrs["method"]),
+        "freq": _clean(df.attrs["freq"]),
+        "backtest_mae": _clean(df.attrs["backtest_mae"]),
+        "fallback": _clean(df.attrs["fallback"]),
+        "disclaimer": _clean(df.attrs["disclaimer"]),
+        "unit": _clean(df.attrs["unit"]),
     }
 
 
