@@ -207,3 +207,18 @@ def test_forecast_extends_annual_series(ed):
         "drift", "linear", "log_linear", "holt", "seasonal_naive", "holt_winters")
     assert "not a prediction" in df.attrs["disclaimer"].lower()
     assert df.attrs["country"] == "FRA"
+
+
+def test_forecast_extends_monthly_series(ed):
+    df = ed.forecast("Inflation (HICP, monthly)", "FRA", horizon=3)
+    hist = df[df["kind"] == "history"]
+    fc = df[df["kind"] == "forecast"]
+    assert len(fc) == 3
+    assert df.attrs["freq"] == 12
+    # period labels look like YYYY-MM with a valid month, and continue
+    # chronologically past the last history period (covers year rollover)
+    assert fc["period"].str.match(r"^\d{4}-\d{2}$").all()
+    months = fc["period"].str.slice(5, 7).astype(int)
+    assert months.between(1, 12).all()
+    assert fc["t"].min() > hist["t"].max()
+    assert fc["period"].min() > hist["period"].max()
