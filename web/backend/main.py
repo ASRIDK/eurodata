@@ -54,6 +54,11 @@ def countries() -> dict:
     return {"rows": df_records(_query("countries"))}
 
 
+@app.get("/api/regions")
+def regions(country: str | None = None) -> dict:
+    return {"rows": df_records(_query("regions", country=country))}
+
+
 @app.get("/api/blocs")
 def blocs() -> dict:
     return {"rows": df_records(_query("blocs"))}

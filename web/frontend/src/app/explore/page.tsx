@@ -9,10 +9,16 @@ import { api, type ChartSpec, type Row } from "@/lib/api";
 import { Flag, FlagName } from "@/components/flag";
 
 const DEFAULT_COUNTRIES = ["FRA", "DEU", "ITA"];
+// Starter comparison for sub-national indicators: Île-de-France, Oberbayern,
+// Lombardia, Comunidad de Madrid.
+const DEFAULT_REGIONS = ["FR10", "DE21", "ITC4", "ES30"];
 
 export default function Explore() {
   const [countries, setCountries] = useState<Row[]>([]);
   const [indicators, setIndicators] = useState<Row[]>([]);
+  const [regions, setRegions] = useState<Row[]>([]);
+  // indicators whose data is per NUTS 2 region rather than per country
+  const [nutsIndicators, setNutsIndicators] = useState<Set<string>>(new Set());
   const [indicator, setIndicator] = useState("GDP per capita");
   const [selected, setSelected] = useState<string[]>(DEFAULT_COUNTRIES);
   const [rows, setRows] = useState<Row[]>([]);
@@ -25,19 +31,39 @@ export default function Explore() {
   >({});
 
   useEffect(() => {
-    // deep link from the home-page globe popup: /explore?country=FRA
+    // deep link from the home-page globe popup: /explore?country=FRA.
+    // Read post-hydration (an initializer would mismatch the prerendered
+    // HTML); a one-shot mount read cannot cascade.
     const c = new URLSearchParams(window.location.search).get("country")?.toUpperCase();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (c && /^[A-Z]{3}$/.test(c)) setSelected([c]);
     Promise.all([
       api<{ rows: Row[] }>("/api/countries"),
       api<{ rows: Row[] }>("/api/indicators"),
+      api<{ rows: Row[] }>("/api/coverage"),
     ])
-      .then(([c, i]) => {
+      .then(([c, i, cov]) => {
         setCountries(c.rows);
         setIndicators(i.rows);
+        setNutsIndicators(
+          new Set(
+            cov.rows
+              .filter((r) => r.geo_level === "NUTS2")
+              .map((r) => String(r.indicator)),
+          ),
+        );
       })
       .catch((e) => setError(e.message));
   }, []);
+
+  const isRegional = nutsIndicators.has(indicator);
+
+  useEffect(() => {
+    if (!isRegional || regions.length) return;
+    api<{ rows: Row[] }>("/api/regions")
+      .then((r) => setRegions(r.rows))
+      .catch((e) => setError(e.message));
+  }, [isRegional, regions.length]);
 
   const load = useCallback(async (ind: string, isos: string[]) => {
     setLoading(true);
@@ -60,12 +86,14 @@ export default function Explore() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-change: load() flips the loading flag, the else clears stale rows
     if (indicator && selected.length) void load(indicator, selected);
     else setRows([]);
   }, [indicator, selected, load]);
 
   useEffect(() => {
     if (!showForecast || !indicator || !selected.length) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale forecasts when the overlay turns off
       setForecasts({});
       return;
     }
@@ -212,7 +240,14 @@ export default function Explore() {
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <select
           value={indicator}
-          onChange={(e) => setIndicator(e.target.value)}
+          onChange={(e) => {
+            const name = e.target.value;
+            // crossing the country <-> region boundary invalidates the
+            // current geography selection
+            if (nutsIndicators.has(name) !== isRegional)
+              setSelected(nutsIndicators.has(name) ? DEFAULT_REGIONS : DEFAULT_COUNTRIES);
+            setIndicator(name);
+          }}
           className="rounded-xl border border-black/15 bg-transparent px-3 py-2 text-sm dark:border-white/20 dark:bg-black"
         >
           {indicators.map((i) => (
@@ -230,25 +265,35 @@ export default function Explore() {
           }}
           className="rounded-xl border border-black/15 bg-transparent px-3 py-2 text-sm dark:border-white/20 dark:bg-black"
         >
-          <option value="">+ add country…</option>
-          {countries.map((c) => (
-            <option key={String(c.iso3)} value={String(c.iso3)}>
-              {String(c.name)}
-            </option>
-          ))}
+          <option value="">{isRegional ? "+ add region…" : "+ add country…"}</option>
+          {isRegional
+            ? regions.map((r) => (
+                <option key={String(r.code)} value={String(r.code)}>
+                  {String(r.country)} · {String(r.name)} ({String(r.code)})
+                </option>
+              ))
+            : countries.map((c) => (
+                <option key={String(c.iso3)} value={String(c.iso3)}>
+                  {String(c.name)}
+                </option>
+              ))}
         </select>
 
         <div className="flex flex-wrap gap-1.5">
-          {selected.map((iso) => (
-            <button
-              key={iso}
-              type="button"
-              onClick={() => setSelected(selected.filter((s) => s !== iso))}
-              className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-xs hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
-            >
-              <Flag code={iso} className="h-3" /> {iso} <X className="h-3 w-3" />
-            </button>
-          ))}
+          {selected.map((iso) => {
+            const region = isRegional ? regions.find((r) => r.code === iso) : null;
+            return (
+              <button
+                key={iso}
+                type="button"
+                onClick={() => setSelected(selected.filter((s) => s !== iso))}
+                className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2.5 py-1 text-xs hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+              >
+                <Flag code={region ? region.country_iso3 : iso} className="h-3" /> {iso}{" "}
+                <X className="h-3 w-3" />
+              </button>
+            );
+          })}
         </div>
 
         <label className="inline-flex items-center gap-2 text-sm">

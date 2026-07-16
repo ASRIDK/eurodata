@@ -51,6 +51,26 @@ def test_countries_and_blocs(db):
         db.bloc_members("EUROPZONE")
 
 
+def test_regions_catalog(db):
+    r = db.regions()
+    assert len(r) == 293 and "FR10" in set(r["code"])
+    fr = db.regions(country="FRA")
+    assert set(fr["country_iso3"]) == {"FRA"} and "Ile de France" in set(fr["name"])
+    # countries() must not leak NUTS rows
+    assert len(db.countries()) == 50
+
+
+def test_series_resolves_nuts_region(db):
+    # a NUTS 2 record flows through series() keyed by its region code
+    load_records(db.con, "Eurostat",
+                 [Record("FR10", "nama_10r_2gdp", 2020, 55000.0)],
+                 vintage=dt.date(2026, 1, 1))
+    df = db.series(country="FR10", indicator="GDP per capita (NUTS 2 region)")
+    assert list(df["iso3"]) == ["FR10"]
+    assert list(df["country"]) == ["Ile de France"]
+    assert list(df["value"]) == [55000.0]
+
+
 def test_indicators_and_search(db):
     econ = db.indicators(domain="Economy")
     assert "GDP" in set(econ["name"]) and set(econ["domain"]) == {"Economy"}
