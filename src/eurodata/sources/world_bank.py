@@ -36,7 +36,7 @@ class WorldBankFetcher(BaseFetcher):
         "prc_hicp_aind": "FP.CPI.TOTL.ZG", # CPI inflation (proxy for HICP)
         "une_rt_a": "SL.UEM.TOTL.ZS",      # Unemployment, % of labour force
         "isoc_ci_ifp_iu": "IT.NET.USER.ZS",     # Individuals using the internet, %
-        "isoc_ci_it_en2": "IT.NET.BBND.P2",     # Fixed broadband subs/100 (proxy for coverage)
+        "isoc_r_broad_h": "IT.NET.BBND.P2",     # Fixed broadband subs/100 (fallback proxy; Eurostat isoc_r_broad_h is primary)
         "nrg_ind_ren": "EG.FEC.RNEW.ZS",        # Renewable energy, % of final consumption
         "env_air_gge": "EN.GHG.ALL.MT.CE.AR5",  # Total GHG emissions (Mt CO2e)
         # v2 indicators: api_code in the catalog IS the World Bank series code.
@@ -45,7 +45,7 @@ class WorldBankFetcher(BaseFetcher):
         "TX.VAL.TECH.MF.ZS": "TX.VAL.TECH.MF.ZS",      # High-tech exports %
         "IP.PAT.RESD": "IP.PAT.RESD",                  # Patent applications, residents
         "IP.JRN.ARTC.SC": "IP.JRN.ARTC.SC",            # Scientific journal articles
-        "GC.DOD.TOTL.GD.ZS": "GC.DOD.TOTL.GD.ZS",      # Central gov debt, % GDP (proxy)
+        "gov_10dd_edpt1": "GC.DOD.TOTL.GD.ZS",          # Central gov debt, % GDP (fallback proxy; Eurostat gov_10dd_edpt1 is primary)
         "NE.RSB.GNFS.ZS": "NE.RSB.GNFS.ZS",            # Trade balance, % GDP
         "BX.KLT.DINV.WD.GD.ZS": "BX.KLT.DINV.WD.GD.ZS",# FDI net inflows, % GDP
         "SP.DYN.TFRT.IN": "SP.DYN.TFRT.IN",            # Fertility rate

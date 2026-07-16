@@ -54,6 +54,12 @@ SERIES_PARAMS: dict[str, dict[str, str]] = {
     # biennial coverage (2014, 2015, 2017, 2019, 2021, 2023, 2025)
     "isoc_cismt": {"indic_is": "E_SM1_ANY", "unit": "PC_ENT",
                    "size_emp": "GE10", "nace_r2": "C10-S951_X_K"},
+    # Households with broadband access, % of households; dataset ends 2021
+    # (isoc_ci_it_en2, the old api_code, was actually an enterprise-connection
+    # dataset — never a real household-broadband source; replaced 2026-07-16).
+    "isoc_r_broad_h": {"unit": "PC_HH"},
+    # General government consolidated gross debt, % of GDP — Maastricht debt
+    "gov_10dd_edpt1": {"sector": "S13", "na_item": "GD", "unit": "PC_GDP"},
 }
 
 
