@@ -260,7 +260,8 @@ class EuroData:
             [country, country, country]).fetchone()
         if row is None:
             names = [r[0] for r in self._con.execute(
-                "SELECT iso3 FROM geography UNION ALL SELECT name FROM geography").fetchall()]
+                "SELECT iso3 FROM geography WHERE iso3 IS NOT NULL "
+                "UNION ALL SELECT name FROM geography").fetchall()]
             raise EuroDataLookupError(_suggest(country, names, "country"))
         return row[0]
 
@@ -410,10 +411,12 @@ class EuroData:
             SELECT i.name AS indicator, d.name AS domain, i.is_proxy,
                    COUNT(s.value) AS rows,
                    COUNT(DISTINCT s.geography_id) AS countries,
+                   ANY_VALUE(g.level) AS geo_level,
                    MIN(s.year) AS first_year, MAX(s.year) AS last_year
             FROM indicator i
             JOIN domain d ON d.id = i.domain_id
             LEFT JOIN statistic_best s ON s.indicator_id = i.id
+            LEFT JOIN geography g ON g.id = s.geography_id
             {where}
             GROUP BY i.name, d.name, i.is_proxy, d.id, i.id
             ORDER BY d.id, i.id""", params)

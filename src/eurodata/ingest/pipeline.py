@@ -26,7 +26,9 @@ def load_records(con: duckdb.DuckDBPyConnection, source_name: str,
         raise ValueError(f"Unknown source: {source_name}")
 
     valid, rejected = validate_records(records)
-    geo_ids = {iso3: gid for gid, iso3 in con.execute("SELECT id, iso3 FROM geography").fetchall()}
+    # keyed by geography.code, not iso3: country rows have code == iso3, and
+    # this is the only column NUTS-region rows can be matched on.
+    geo_ids = {code: gid for gid, code in con.execute("SELECT id, code FROM geography").fetchall()}
     ind_ids = {code: iid for iid, code in
                con.execute("SELECT id, api_code FROM indicator WHERE api_code IS NOT NULL").fetchall()}
 

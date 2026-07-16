@@ -24,7 +24,8 @@ const ROADMAP = [
   },
   {
     title: "Forecasting",
-    body: "Trend projections per indicator, once the dataset's trustworthiness work is done.",
+    href: "/explore",
+    body: "Trend projections per indicator with an uncertainty band, available as an overlay in Explore and via the AI analyst.",
   },
   {
     title: "More domains",
@@ -34,8 +35,8 @@ const ROADMAP = [
   {
     title: "Sub-national data",
     body:
-      "NUTS-region breakdowns below the country level — the schema is already " +
-      "forward-compatible for this.",
+      "NUTS-region breakdowns below the country level. First indicator live in the " +
+      "database (GDP per capita, 285 NUTS 2 regions) — not yet browsable in Explore.",
   },
 ] as const;
 

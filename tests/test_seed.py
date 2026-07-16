@@ -57,7 +57,7 @@ def test_seed_all_populates_tables():
     assert con.execute("SELECT COUNT(*) FROM geography").fetchone()[0] >= 40
     assert con.execute("SELECT COUNT(*) FROM bloc").fetchone()[0] == 6
     assert con.execute("SELECT COUNT(*) FROM domain").fetchone()[0] == 9
-    assert con.execute("SELECT COUNT(*) FROM indicator").fetchone()[0] == 47
+    assert con.execute("SELECT COUNT(*) FROM indicator").fetchone()[0] == 48
     # sub-annual indicators carry their frequency (default is 'annual')
     freqs = dict(con.execute(
         "SELECT name, frequency FROM indicator WHERE frequency != 'annual'").fetchall())
