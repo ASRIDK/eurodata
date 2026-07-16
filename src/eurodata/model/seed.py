@@ -5,6 +5,7 @@ from eurodata.reference.blocs import BLOCS, MEMBERSHIPS
 from eurodata.reference.borders import BORDERS  # noqa: F401 (used by graph build)
 from eurodata.reference.catalog import DOMAINS, INDICATORS, SOURCES
 from eurodata.reference.events import EVENTS
+from eurodata.reference.nuts import NUTS2_REGIONS
 
 
 def seed_events(con: duckdb.DuckDBPyConnection) -> None:
@@ -28,6 +29,14 @@ def seed_all(con: duckdb.DuckDBPyConnection) -> None:
             "ON CONFLICT DO NOTHING",
             [i, c["iso3"], c["name"], c["iso2"], c["iso3"],
              c["is_transcontinental"], c["is_disputed"], c["note"]],
+        )
+    country_ids = {iso3: gid for gid, iso3 in
+                    con.execute("SELECT id, iso3 FROM geography WHERE level = 'country'").fetchall()}
+    for i, r in enumerate(NUTS2_REGIONS, start=len(COUNTRIES) + 1):
+        con.execute(
+            "INSERT INTO geography (id, code, level, parent_id, name) "
+            "VALUES (?, ?, 'NUTS2', ?, ?) ON CONFLICT DO NOTHING",
+            [i, r["code"], country_ids.get(r["parent_iso3"]), r["name"]],
         )
     for i, b in enumerate(BLOCS, start=1):
         con.execute("INSERT INTO bloc (id, code, name) VALUES (?, ?, ?) "

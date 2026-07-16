@@ -6,6 +6,7 @@ import time
 from eurodata.config import get_settings
 from eurodata.ingest.snapshot import save_snapshot
 from eurodata.reference.countries import COUNTRIES
+from eurodata.reference.nuts import NUTS2_REGIONS
 from eurodata.sources.base import BaseFetcher, Record, parse_period
 from eurodata.sources.registry import register
 
@@ -14,6 +15,12 @@ logger = logging.getLogger(__name__)
 # Eurostat uses a few non-ISO geo codes.
 _EUROSTAT_GEO_FIX = {"EL": "GRC", "UK": "GBR"}
 _ISO2_TO_ISO3 = {c["iso2"]: c["iso3"] for c in COUNTRIES}
+
+# api_codes fetched at NUTS 2 (sub-national) granularity: their "geo" values
+# are NUTS 2 region codes, not country codes, and normalize_eurostat() must
+# not run them through the country iso2->iso3 lookup.
+NUTS2_SERIES = {"nama_10r_2gdp"}
+_VALID_NUTS2_CODES = {r["code"] for r in NUTS2_REGIONS}
 
 _API_BASE = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/"
 _CONNECT_TIMEOUT, _READ_TIMEOUT = 10, 60
@@ -60,6 +67,8 @@ SERIES_PARAMS: dict[str, dict[str, str]] = {
     "isoc_r_broad_h": {"unit": "PC_HH"},
     # General government consolidated gross debt, % of GDP — Maastricht debt
     "gov_10dd_edpt1": {"sector": "S13", "na_item": "GD", "unit": "PC_GDP"},
+    # GDP per inhabitant, current prices, EUR — by NUTS 2 region (see NUTS2_SERIES)
+    "nama_10r_2gdp": {"unit": "EUR_HAB"},
 }
 
 
@@ -77,12 +86,20 @@ def dataset_id(api_code: str) -> str:
     return api_code.split("#", 1)[0]
 
 
-def normalize_eurostat(rows: list[dict], indicator_code: str) -> list[Record]:
+def normalize_eurostat(rows: list[dict], indicator_code: str, *, nuts2: bool = False) -> list[Record]:
     out: list[Record] = []
     for row in rows:
-        iso3 = _to_iso3(str(row.get("geo", "")))
-        if iso3 is None:
-            continue
+        if nuts2:
+            # geo values here are NUTS 2 codes already, not country codes;
+            # the dataset's "geo" dimension also carries country/NUTS1/EU
+            # aggregate rows mixed in, so only accept known NUTS 2 codes.
+            iso3 = str(row.get("geo", ""))
+            if iso3 not in _VALID_NUTS2_CODES:
+                continue
+        else:
+            iso3 = _to_iso3(str(row.get("geo", "")))
+            if iso3 is None:
+                continue
         period = parse_period(str(row.get("TIME_PERIOD", "")))
         if period is None:
             continue
@@ -170,7 +187,8 @@ class EurostatFetcher(BaseFetcher):
                 self.errors.append((api_code, str(exc)))
                 logger.warning("Eurostat %s failed: %s", api_code, exc)
                 continue
-            series = normalize_eurostat(jsonstat_rows(data), api_code)
+            series = normalize_eurostat(jsonstat_rows(data), api_code,
+                                        nuts2=api_code in NUTS2_SERIES)
             logger.info("Eurostat %s: %d records", api_code, len(series))
             records.extend(series)
         return records

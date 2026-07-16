@@ -131,6 +131,13 @@ INDICATORS = [
      "definition": "Individuals aged 16-24 using the internet for participating in social networks, % of that age group (Eurostat isoc_ci_ac_i, indic_is=I_IUSNET, ind_type=Y16_24)."},
     {"domain": "Social Media", "name": "Enterprises Using Social Media", "unit": "%", "api_code": "isoc_cismt", "source_priority": 1,
      "definition": "Enterprises (10+ persons employed, business economy) using any social media, % of enterprises (Eurostat isoc_cismt, indic_is=E_SM1_ANY, size_emp=GE10)."},
+    # --- added 2026-07-16: first sub-national (NUTS 2) indicator ---
+    # One row per NUTS 2 region (see reference/nuts.py), not per country —
+    # geography_id points at a 'NUTS2'-level geography row whose parent_id is
+    # the owning country. Coverage is EU/EFTA/candidate countries only (the
+    # dataset has no NUTS breakdown for non-participating countries).
+    {"domain": "Economy", "name": "GDP per capita (NUTS 2 region)", "unit": "EUR", "api_code": "nama_10r_2gdp", "source_priority": 1,
+     "definition": "GDP per inhabitant at current market prices, by NUTS 2 region (Eurostat nama_10r_2gdp, unit=EUR_HAB)."},
 ]
 
 SOURCES = [
