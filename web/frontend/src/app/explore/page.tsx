@@ -25,6 +25,9 @@ export default function Explore() {
   >({});
 
   useEffect(() => {
+    // deep link from the home-page globe popup: /explore?country=FRA
+    const c = new URLSearchParams(window.location.search).get("country")?.toUpperCase();
+    if (c && /^[A-Z]{3}$/.test(c)) setSelected([c]);
     Promise.all([
       api<{ rows: Row[] }>("/api/countries"),
       api<{ rows: Row[] }>("/api/indicators"),
