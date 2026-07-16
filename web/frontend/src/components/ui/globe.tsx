@@ -12,7 +12,7 @@ import type { CountryMarker } from "@/components/european-markers";
 // math for a square canvas at scale 1 so clicks and popups can be mapped to
 // exact marker screen positions using the current phi/theta.
 
-const THETA = 0.3; // fixed tilt toward the northern hemisphere
+const THETA = 0.4; // fixed tilt toward the northern hemisphere
 const MARKER_RADIUS = 0.85; // 0.8 sphere + 0.05 default markerElevation
 // phi that puts ~10°E (central Europe) at the front-center of the globe
 const EUROPE_PHI = 4.54;
@@ -40,6 +40,7 @@ export function Globe({
   markers,
   selectedId,
   paused = false,
+  rotateSpeed = AUTO_SPEED,
   onMarkerClick,
   onBackgroundClick,
   className,
@@ -47,6 +48,8 @@ export function Globe({
   markers: CountryMarker[];
   selectedId?: string | null;
   paused?: boolean;
+  /** Radians per frame of auto-rotation; 0 disables (reduced motion). */
+  rotateSpeed?: number;
   /** Marker chosen by canvas hit detection or a label click; pos is in px within the globe container. */
   onMarkerClick?: (marker: CountryMarker, pos: { x: number; y: number }) => void;
   /** Click that hit no marker, or the start of a drag. */
@@ -59,11 +62,13 @@ export function Globe({
   const dragDeltaRef = useRef(0);
   const draggingRef = useRef<{ startX: number; moved: boolean } | null>(null);
   const pausedRef = useRef(paused);
+  const speedRef = useRef(rotateSpeed);
   const callbacksRef = useRef({ onMarkerClick, onBackgroundClick });
   const globeRef = useRef<ReturnType<typeof createGlobe> | null>(null);
   const [dark, setDark] = useState<boolean | null>(null);
 
   pausedRef.current = paused;
+  speedRef.current = rotateSpeed;
   callbacksRef.current = { onMarkerClick, onBackgroundClick };
 
   useEffect(() => {
@@ -118,7 +123,7 @@ export function Globe({
     ro.observe(containerRef.current);
 
     let raf = requestAnimationFrame(function frame() {
-      if (!draggingRef.current && !pausedRef.current) phiRef.current += AUTO_SPEED;
+      if (!draggingRef.current && !pausedRef.current) phiRef.current += speedRef.current;
       const state: Parameters<typeof globe.update>[0] = {
         phi: phiRef.current + dragDeltaRef.current / DRAG_SENSITIVITY,
       };
@@ -165,9 +170,12 @@ export function Globe({
   };
 
   const selectMarker = (m: CountryMarker) => {
-    const box = containerRef.current!.getBoundingClientRect();
+    // offsetWidth/Height (layout px), not getBoundingClientRect: the popup is
+    // positioned in the container's untransformed coordinate space, and an
+    // ancestor may carry a CSS scale (the scroll-shrinking hero).
+    const el = containerRef.current!;
     const p = project(m.location, currentPhi());
-    callbacksRef.current.onMarkerClick?.(m, { x: p.x * box.width, y: p.y * box.height });
+    callbacksRef.current.onMarkerClick?.(m, { x: p.x * el.offsetWidth, y: p.y * el.offsetHeight });
   };
 
   return (
@@ -180,7 +188,11 @@ export function Globe({
         className="size-full cursor-grab opacity-0 transition-opacity duration-500 [contain:layout_paint_size] [touch-action:pan-y]"
         onPointerDown={(e) => {
           draggingRef.current = { startX: e.clientX, moved: false };
-          e.currentTarget.setPointerCapture(e.pointerId);
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {
+            // synthetic events carry no active pointer; drag still works
+          }
           e.currentTarget.style.cursor = "grabbing";
         }}
         onPointerMove={(e) => {
