@@ -24,3 +24,47 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Globe marker labels — positioned with CSS Anchor Positioning against the
+   1px anchor elements cobe creates for markers that have an `id`
+   (anchor-name: --cobe-{id}). Visibility comes from --cobe-visible-{id},
+   which cobe defines on :root only while the marker faces the camera: the
+   per-label inline opacity/filter/pointer-events read it with a hidden-state
+   fallback, so labels fade + blur out as markers rotate past the horizon.
+   Browsers without anchor positioning get no labels (markers stay clickable
+   on the canvas itself). */
+@supports (anchor-name: --a) {
+  .marker-label {
+    position: absolute;
+    bottom: anchor(top);
+    left: anchor(center);
+    translate: -50% -6px;
+    transition:
+      opacity 0.3s,
+      filter 0.3s;
+  }
+}
+@supports not (anchor-name: --a) {
+  .marker-label {
+    display: none;
+  }
+}
+
+/* Country popup entrances (tailwindcss-animate is not installed) */
+@keyframes popup-in {
+  from {
+    opacity: 0;
+    scale: 0.95;
+  }
+}
+.popup-in {
+  animation: popup-in 0.2s ease-out;
+}
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+.sheet-in {
+  animation: sheet-in 0.25s ease-out;
+}

@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { ExternalLink, GitBranch, ShieldCheck } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import { CountryPopup, KPI_INDICATORS, type KpiData } from "@/components/country-popup";
+import { EUROPEAN_MARKERS, type CountryMarker } from "@/components/european-markers";
+import { Globe } from "@/components/ui/globe";
 import { api, type Row } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -40,50 +43,94 @@ const ROADMAP = [
   },
 ] as const;
 
+type KpiCache = Map<string, Map<string, Row>>;
+
 export default function Home() {
-  const [years, setYears] = useState<[number, number] | null>(null);
-  const [coverage, setCoverage] = useState<Row[]>([]);
-  const [countries, setCountries] = useState<number | null>(null);
   const [sources, setSources] = useState<Row[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const [selectedCountry, setSelectedCountry] = useState<CountryMarker | null>(null);
+  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [countryData, setCountryData] = useState<KpiData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [kpiError, setKpiError] = useState<string | null>(null);
+  // One /api/latest fetch per KPI covers every country; the shared promise
+  // means concurrent first clicks reuse the same in-flight batch.
+  const kpiCacheRef = useRef<Promise<KpiCache> | null>(null);
+
   useEffect(() => {
-    Promise.all([
-      api<{ years: [number, number] }>("/api/health"),
-      api<{ rows: Row[] }>("/api/coverage"),
-      api<{ rows: Row[] }>("/api/countries"),
-      api<{ rows: Row[] }>("/api/sources"),
-    ])
-      .then(([h, cov, c, src]) => {
-        setYears(h.years);
-        setCoverage(cov.rows);
-        setCountries(c.rows.length);
-        setSources(src.rows);
-      })
+    api<{ rows: Row[] }>("/api/sources")
+      .then((src) => setSources(src.rows))
       .catch((e) => setError(e.message));
   }, []);
 
-  const populated = coverage.filter((r) => Number(r.rows) > 0);
-  const totalRows = coverage.reduce((acc, r) => acc + Number(r.rows ?? 0), 0);
+  const closePopup = useCallback(() => {
+    setSelectedCountry(null);
+    setAnchor(null);
+  }, []);
+
+  const handleMarkerClick = useCallback((marker: CountryMarker, pos: { x: number; y: number }) => {
+    setSelectedCountry(marker);
+    setAnchor(pos);
+    setKpiError(null);
+    kpiCacheRef.current ??= Promise.all(
+      KPI_INDICATORS.map((k) =>
+        api<{ rows: Row[] }>(`/api/latest?indicator=${encodeURIComponent(k)}`),
+      ),
+    ).then((results) => {
+      const cache: KpiCache = new Map();
+      KPI_INDICATORS.forEach((k, i) =>
+        cache.set(k, new Map(results[i].rows.map((r) => [String(r.iso3), r]))),
+      );
+      return cache;
+    });
+    setLoading(true);
+    kpiCacheRef.current
+      .then((cache) => {
+        const data: KpiData = {};
+        for (const k of KPI_INDICATORS) {
+          const row = cache.get(k)?.get(marker.iso3);
+          data[k] =
+            row && row.value != null
+              ? {
+                  value: Number(row.value),
+                  unit: row.unit == null ? null : String(row.unit),
+                  period: String(row.period),
+                }
+              : null;
+        }
+        setCountryData(data);
+      })
+      .catch((e) => {
+        kpiCacheRef.current = null; // let a later click retry
+        setKpiError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10">
-      <h1 className="text-3xl font-semibold tracking-tight">
-        European data
-      </h1>
-      <p className="mt-2 max-w-2xl text-black/60 dark:text-white/60">
-        Official statistics on economy, demographics, digital, energy &amp;
-        climate and AI &amp; technology — provenance-first, with a curated
-        event layer.{" "}
-        <Link href="/chat" className="font-medium underline underline-offset-4">
-          Ask the AI analyst
-        </Link>{" "}
-        or{" "}
-        <Link href="/explore" className="font-medium underline underline-offset-4">
-          explore the data
-        </Link>
-        .
-      </p>
+      <h1 className="sr-only">European data</h1>
+
+      <section className="relative mx-auto w-full max-w-[600px]">
+        <Globe
+          markers={EUROPEAN_MARKERS}
+          selectedId={selectedCountry?.id ?? null}
+          paused={selectedCountry !== null}
+          onMarkerClick={handleMarkerClick}
+          onBackgroundClick={closePopup}
+        />
+        {selectedCountry && anchor && (
+          <CountryPopup
+            country={selectedCountry}
+            anchor={anchor}
+            data={countryData}
+            loading={loading}
+            error={kpiError}
+            onClose={closePopup}
+          />
+        )}
+      </section>
 
       {error ? (
         <div className="mt-8 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm">
@@ -91,13 +138,6 @@ export default function Home() {
         </div>
       ) : (
         <>
-          <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Indicators with data" value={coverage.length ? String(populated.length) : "…"} />
-            <Stat label="Countries" value={countries === null ? "…" : String(countries)} />
-            <Stat label="Years" value={years ? `${years[0]}–${years[1]}` : "…"} />
-            <Stat label="Data points" value={coverage.length ? totalRows.toLocaleString("en") : "…"} />
-          </div>
-
           <h2 className="mb-1 mt-10 flex items-center gap-2 text-lg font-medium">
             <ShieldCheck className="h-5 w-5 text-black/50 dark:text-white/50" />
             Sources &amp; reliability
@@ -165,15 +205,6 @@ export default function Home() {
         </>
       )}
     </main>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-black/10 px-4 py-3 dark:border-white/10">
-      <div className="text-2xl font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-black/50 dark:text-white/50">{label}</div>
-    </div>
   );
 }
 
