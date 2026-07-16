@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Flag } from "@/components/flag";
 import type { CountryMarker } from "@/components/european-markers";
@@ -46,6 +46,23 @@ export function CountryPopup({
   onClose: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const desktopRef = useRef<HTMLDivElement>(null);
+  // The anchor is in the globe container's coordinate space, but that
+  // container can extend past the viewport (the zoomed hero), so the card is
+  // nudged back inside the viewport after render.
+  const [nudgeY, setNudgeY] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = desktopRef.current;
+    if (!el) return;
+    const b = el.getBoundingClientRect();
+    const topBound = 64; // clear of the fixed navbar
+    if (b.top - nudgeY < topBound) setNudgeY(topBound - (b.top - nudgeY));
+    else if (b.bottom - nudgeY > window.innerHeight - 8)
+      setNudgeY(Math.min(0, window.innerHeight - 8 - (b.bottom - nudgeY)));
+    else setNudgeY(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchor]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -129,11 +146,14 @@ export function CountryPopup({
   return (
     <div ref={cardRef}>
       <div
+        ref={desktopRef}
         className="popup-in absolute z-30 hidden w-64 rounded-2xl border border-black/10 bg-white p-4 shadow-xl sm:block dark:border-white/15 dark:bg-neutral-900"
         style={{
           left: `clamp(8px, calc(${anchor.x}px - 8rem), calc(100% - 264px))`,
           top: placeBelow ? anchor.y + 16 : anchor.y - 14,
-          transform: placeBelow ? undefined : "translateY(-100%)",
+          transform: placeBelow
+            ? `translateY(${nudgeY}px)`
+            : `translateY(calc(-100% + ${nudgeY}px))`,
         }}
       >
         {body}
