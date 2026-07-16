@@ -42,7 +42,7 @@ def _suggest(value: str, candidates: list[str], kind: str) -> str:
 # period: '2020' / '2020-Q3' / '2020-07'; t: decimal year (period start) for
 # plotting and ordering sub-annual series.
 _SERIES_SQL = """
-SELECT g.iso3, g.name AS country, d.name AS domain, i.name AS indicator,
+SELECT COALESCE(g.iso3, g.code) AS iso3, g.name AS country, d.name AS domain, i.name AS indicator,
        s.year, s.quarter, s.month,
        CASE WHEN s.month IS NOT NULL THEN printf('%d-%02d', s.year, s.month)
             WHEN s.quarter IS NOT NULL THEN printf('%d-Q%d', s.year, s.quarter)
@@ -161,6 +161,18 @@ class EuroData:
             "SELECT iso3, iso2, name, is_transcontinental, is_disputed "
             "FROM geography WHERE level = 'country' ORDER BY name")
 
+    def regions(self, country: str | None = None) -> pd.DataFrame:
+        """NUTS 2 regions (code, name, parent country), optionally one country's."""
+        where, params = "", []
+        if country is not None:
+            where = "AND p.id = ?"
+            params = [self._resolve_country(country)]
+        return self.query(f"""
+            SELECT g.code, g.name, p.iso3 AS country_iso3, p.name AS country
+            FROM geography g JOIN geography p ON p.id = g.parent_id
+            WHERE g.level = 'NUTS2' {where}
+            ORDER BY g.code""", params)
+
     def blocs(self) -> pd.DataFrame:
         return self.query(
             "SELECT b.code, b.name, COUNT(gb.geography_id) FILTER (WHERE gb.until_year IS NULL) AS current_members "
@@ -254,15 +266,19 @@ class EuroData:
 
     # -- resolution -------------------------------------------------------
     def _resolve_country(self, country: str) -> int:
+        # Resolves any geography: country iso3/iso2/name, or a region code
+        # (geography.code == iso3 for countries, so the extra match only
+        # adds NUTS codes like 'FR10').
         row = self._con.execute(
             "SELECT id FROM geography WHERE upper(iso3) = upper(?) "
-            "OR upper(iso2) = upper(?) OR lower(name) = lower(?)",
-            [country, country, country]).fetchone()
+            "OR upper(iso2) = upper(?) OR lower(name) = lower(?) "
+            "OR upper(code) = upper(?)",
+            [country, country, country, country]).fetchone()
         if row is None:
             names = [r[0] for r in self._con.execute(
-                "SELECT iso3 FROM geography WHERE iso3 IS NOT NULL "
+                "SELECT code FROM geography "
                 "UNION ALL SELECT name FROM geography").fetchall()]
-            raise EuroDataLookupError(_suggest(country, names, "country"))
+            raise EuroDataLookupError(_suggest(country, names, "country or region"))
         return row[0]
 
     def _resolve_indicator(self, indicator: str) -> int:
