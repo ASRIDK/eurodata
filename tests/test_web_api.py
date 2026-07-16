@@ -27,6 +27,21 @@ def test_countries():
     assert {"iso3", "name"} <= set(rows[0])
 
 
+def test_regions_endpoint():
+    rows = client.get("/api/regions").json()["rows"]
+    assert len(rows) == 293
+    fr = client.get("/api/regions", params={"country": "FRA"}).json()["rows"]
+    assert fr and all(r["country_iso3"] == "FRA" for r in fr)
+
+
+def test_series_for_nuts_region():
+    rows = client.get("/api/series", params={
+        "indicator": "GDP per capita (NUTS 2 region)", "country": "FR10",
+    }).json()["rows"]
+    assert rows and all(r["iso3"] == "FR10" for r in rows)
+    assert rows[0]["country"] == "Ile de France"
+
+
 def test_series_filters():
     rows = client.get("/api/series", params={
         "indicator": "GDP", "country": "FRA", "start": 2010, "end": 2015,

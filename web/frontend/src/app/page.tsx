@@ -35,9 +35,11 @@ const ROADMAP = [
   },
   {
     title: "Sub-national data",
+    href: "/explore",
     body:
-      "NUTS-region breakdowns below the country level. First indicator live in the " +
-      "database (GDP per capita, 285 NUTS 2 regions) — not yet browsable in Explore.",
+      "NUTS 2 region breakdowns below the country level: GDP per capita across 285 " +
+      "regions, browsable in Explore — pick the regional indicator and compare regions " +
+      "like Île-de-France, Oberbayern, and Lombardia.",
   },
 ] as const;
 
