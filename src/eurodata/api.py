@@ -44,11 +44,11 @@ def _suggest(value: str, candidates: list[str], kind: str) -> str:
 _SERIES_SQL = """
 SELECT COALESCE(g.iso3, g.code) AS iso3, g.name AS country, d.name AS domain, i.name AS indicator,
        s.year, s.quarter, s.month,
-       CASE WHEN s.month IS NOT NULL THEN printf('%d-%02d', s.year, s.month)
-            WHEN s.quarter IS NOT NULL THEN printf('%d-Q%d', s.year, s.quarter)
+       CASE WHEN s.month > 0 THEN printf('%d-%02d', s.year, s.month)
+            WHEN s.quarter > 0 THEN printf('%d-Q%d', s.year, s.quarter)
             ELSE CAST(s.year AS VARCHAR) END AS period,
-       s.year + CASE WHEN s.month IS NOT NULL THEN (s.month - 1) / 12.0
-                     WHEN s.quarter IS NOT NULL THEN (s.quarter - 1) / 4.0
+       s.year + CASE WHEN s.month > 0 THEN (s.month - 1) / 12.0
+                     WHEN s.quarter > 0 THEN (s.quarter - 1) / 4.0
                      ELSE 0.0 END AS t,
        s.value, COALESCE(s.unit, i.unit) AS unit,
        src.name AS source, i.is_proxy, i.proxy_note
@@ -377,12 +377,12 @@ class EuroData:
         ind_id = self._resolve_indicator(indicator)
         geo_id = self._resolve_country(country)
         df = self.query(
-            "SELECT CASE WHEN s.month IS NOT NULL THEN printf('%d-%02d', s.year, s.month) "
-            "            WHEN s.quarter IS NOT NULL THEN printf('%d-Q%d', s.year, s.quarter) "
+            "SELECT CASE WHEN s.month > 0 THEN printf('%d-%02d', s.year, s.month) "
+            "            WHEN s.quarter > 0 THEN printf('%d-Q%d', s.year, s.quarter) "
             "            ELSE CAST(s.year AS VARCHAR) END AS period, "
             "       s.year, "
-            "       s.year + CASE WHEN s.month IS NOT NULL THEN (s.month - 1) / 12.0 "
-            "                     WHEN s.quarter IS NOT NULL THEN (s.quarter - 1) / 4.0 "
+            "       s.year + CASE WHEN s.month > 0 THEN (s.month - 1) / 12.0 "
+            "                     WHEN s.quarter > 0 THEN (s.quarter - 1) / 4.0 "
             "                     ELSE 0.0 END AS t, "
             "       src.name AS source, s.value, COALESCE(s.unit, i.unit) AS unit, "
             "       src.reliability_score "
@@ -427,10 +427,11 @@ class EuroData:
         if hist.empty:
             raise EuroDataLookupError(
                 f"No data to forecast for {indicator!r} in {country!r}.")
-        # single frequency: infer from the sub-annual columns
-        if hist["month"].notna().any():
+        # single frequency: infer from the sub-annual columns (0 = not
+        # applicable, the NOT NULL sentinel; annual rows carry month/quarter 0)
+        if (hist["month"] > 0).any():
             freq, step = 12, 1.0 / 12.0
-        elif hist["quarter"].notna().any():
+        elif (hist["quarter"] > 0).any():
             freq, step = 4, 0.25
         else:
             freq, step = 1, 1.0
@@ -477,7 +478,8 @@ class EuroData:
                    COUNT(s.value) AS rows,
                    COUNT(DISTINCT s.geography_id) AS countries,
                    ANY_VALUE(g.level) AS geo_level,
-                   MIN(s.year) AS first_year, MAX(s.year) AS last_year
+                   MIN(s.year) AS first_year, MAX(s.year) AS last_year,
+                   year(CURRENT_DATE) - MAX(s.year) AS years_stale
             FROM indicator i
             JOIN domain d ON d.id = i.domain_id
             LEFT JOIN statistic_best s ON s.indicator_id = i.id
@@ -581,11 +583,15 @@ class EuroData:
                 raise EuroDataLookupError(_suggest(event_code, codes, "event"))
         data = self.query(
             f"{_SERIES_SQL} WHERE s.indicator_id = ?", [ind_id])
-        # Period midpoints: month -> (m-0.5)/12, quarter -> (q-0.5)/4, year -> +0.5
-        data = data.assign(t_mid=data["year"]
-                           + ((data["month"] - 0.5) / 12.0)
-                             .fillna((data["quarter"] - 0.5) / 4.0)
-                             .fillna(0.5))
+        # Period midpoints: month -> (m-0.5)/12, quarter -> (q-0.5)/4, year -> +0.5.
+        # month/quarter are 0 (the NOT NULL "not applicable" sentinel), never
+        # NULL/NaN, so branch on > 0 explicitly rather than on NaN cascading
+        # through fillna -- otherwise every annual row would be mis-dated.
+        m = data["month"].to_numpy()
+        q = data["quarter"].to_numpy()
+        offset = np.where(m > 0, (m - 0.5) / 12.0,
+                          np.where(q > 0, (q - 0.5) / 4.0, 0.5))
+        data = data.assign(t_mid=data["year"] + offset)
         out = []
         for _, ev in evs.iterrows():
             start = str(ev["start_date"])
