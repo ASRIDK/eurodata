@@ -7,19 +7,23 @@ The database is opened read-only (see deps.py); this process never writes.
 """
 from __future__ import annotations
 
+import hashlib
+import io
 from typing import Any, Literal
 
+import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 
 load_dotenv()  # GOOGLE_API_KEY etc. from .env, regardless of how uvicorn was launched
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from eurodata import EuroDataLookupError
 from web.backend import deps
 from web.backend.chat import ChatNotConfiguredError, run_chat
+from web.backend.ratelimit import from_env as _rate_limiter_from_env
 from web.backend.tools import _clean, df_records
 
 app = FastAPI(title="eurodata API", version="0.1.0")
@@ -29,7 +33,10 @@ app.add_middleware(
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["ETag", "Retry-After", "Content-Disposition"],
 )
+
+_chat_limiter = _rate_limiter_from_env()
 
 
 @app.exception_handler(EuroDataLookupError)
@@ -38,9 +45,25 @@ def _lookup_error(_: Request, exc: EuroDataLookupError) -> JSONResponse:
 
 
 def _query(method: str, /, **kwargs) -> Any:
-    """Run one EuroData method under the connection lock."""
-    with deps.lock:
-        return getattr(deps.get_ed(), method)(**kwargs)
+    """Run one EuroData method on a fresh per-request cursor (see deps.py)."""
+    return getattr(deps.get_ed(), method)(**kwargs)
+
+
+def _latest_vintage() -> str:
+    """Max vintage date in the dataset; the cache key for static-ish endpoints."""
+    row = deps.get_ed().query(
+        "SELECT CAST(MAX(vintage_date) AS VARCHAR) AS v FROM statistic_record")
+    return (row["v"].iloc[0] if not row.empty and row["v"].iloc[0] else "0")
+
+
+def _cached(request: Request, name: str, build) -> Response:
+    """Serve a static-ish payload with an ETag/Cache-Control keyed on the latest
+    vintage. Returns 304 when the client's If-None-Match still matches."""
+    etag = 'W/"' + hashlib.sha256(f"{name}:{_latest_vintage()}".encode()).hexdigest()[:16] + '"'
+    headers = {"ETag": etag, "Cache-Control": "public, max-age=300"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(content=build(), headers=headers)
 
 
 @app.get("/api/health")
@@ -50,8 +73,9 @@ def health() -> dict:
 
 
 @app.get("/api/countries")
-def countries() -> dict:
-    return {"rows": df_records(_query("countries"))}
+def countries(request: Request) -> Response:
+    return _cached(request, "countries",
+                   lambda: {"rows": df_records(_query("countries"))})
 
 
 @app.get("/api/regions")
@@ -70,8 +94,9 @@ def domains() -> dict:
 
 
 @app.get("/api/indicators")
-def indicators(domain: str | None = None) -> dict:
-    return {"rows": df_records(_query("indicators", domain=domain))}
+def indicators(request: Request, domain: str | None = None) -> Response:
+    return _cached(request, f"indicators:{domain or ''}",
+                   lambda: {"rows": df_records(_query("indicators", domain=domain))})
 
 
 @app.get("/api/sources")
@@ -196,10 +221,81 @@ def event_study(indicator: str, event_code: str | None = None,
 
 
 @app.get("/api/correlate")
-def correlate(a: str, b: str, lag: int = 0, min_years: int = 10) -> dict:
+def correlate(a: str, b: str, lag: int = 0, min_years: int = 10,
+              on: str = "growth") -> dict:
+    if on not in ("growth", "levels"):
+        raise HTTPException(422, "on must be 'growth' or 'levels'")
     df = _query("lagged_correlation", indicator_a=a, indicator_b=b, lag=lag,
-                min_years=min_years)
+                min_years=min_years, on=on)
+    return {"rows": df_records(df), "basis": on}
+
+
+@app.get("/api/revisions")
+def revisions(indicator: str, country: str) -> dict:
+    df = _query("revisions", indicator=indicator, country=country)
+    return {
+        "rows": df_records(df),
+        "summary": df_records(df.attrs.get("summary")),
+        "n_revised": int(df.attrs.get("n_revised", 0)),
+    }
+
+
+@app.get("/api/revisions-summary")
+def revisions_summary(country: str | None = None, indicator: str | None = None) -> dict:
+    df = _query("revisions_summary", country=country, indicator=indicator)
     return {"rows": df_records(df)}
+
+
+@app.get("/api/country-correlations")
+def country_correlations(country: str, limit: int = 20) -> dict:
+    df = _query("country_correlations", country=country, limit=limit)
+    return {"rows": df_records(df)}
+
+
+_EXPORT_VIEWS = {"series", "latest", "compare", "coverage", "revisions-summary"}
+
+
+@app.get("/api/export")
+def export(view: str, fmt: str = "csv", indicator: str | None = None,
+           country: str | None = None, countries: str | None = None,
+           bloc: str | None = None, start: int | None = None,
+           end: int | None = None) -> Response:
+    """Download any series/ranking view as CSV or Parquet. DuckDB-backed."""
+    if view not in _EXPORT_VIEWS:
+        raise HTTPException(422, f"view must be one of {sorted(_EXPORT_VIEWS)}")
+    if fmt not in ("csv", "parquet"):
+        raise HTTPException(422, "fmt must be 'csv' or 'parquet'")
+    if view == "series":
+        df = _query("series", indicator=indicator, country=country, bloc=bloc,
+                    start=start, end=end)
+    elif view == "latest":
+        if not indicator:
+            raise HTTPException(422, "latest export needs an indicator")
+        df = _query("latest", indicator=indicator, bloc=bloc)
+    elif view == "compare":
+        iso_list = [c.strip() for c in (countries or "").split(",") if c.strip()]
+        if not iso_list or not indicator:
+            raise HTTPException(422, "compare export needs indicator and countries")
+        df = _query("compare", countries=iso_list, indicator=indicator,
+                    start=start, end=end).reset_index()
+    elif view == "coverage":
+        df = _query("coverage")
+    else:  # revisions-summary
+        df = _query("revisions_summary", country=country, indicator=indicator)
+
+    stem = f"eurodata-{view}"
+    if indicator:
+        stem += "-" + indicator.lower().replace(" ", "_")[:40]
+    if fmt == "parquet":
+        buf = io.BytesIO()
+        df.to_parquet(buf, index=False)
+        return Response(
+            content=buf.getvalue(), media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{stem}.parquet"'})
+    csv = df.to_csv(index=False)
+    return Response(
+        content=csv, media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{stem}.csv"'})
 
 
 class ChatMessage(BaseModel):
@@ -212,9 +308,15 @@ class ChatRequest(BaseModel):
 
 
 @app.post("/api/chat")
-def chat(req: ChatRequest) -> dict:
+def chat(req: ChatRequest, request: Request) -> dict:
     if not req.messages or req.messages[-1].role != "user":
         raise HTTPException(422, "last message must be from the user")
+    client_ip = request.client.host if request.client else "unknown"
+    retry_after = _chat_limiter.check(client_ip)
+    if retry_after is not None:
+        raise HTTPException(
+            429, "Rate limit exceeded for the AI analyst. Please wait and retry.",
+            headers={"Retry-After": str(int(retry_after))})
     try:
         blocks = run_chat([m.model_dump() for m in req.messages])
     except ChatNotConfiguredError as exc:
