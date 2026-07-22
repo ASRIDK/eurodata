@@ -176,13 +176,15 @@ TOOL_DEFS: list[dict[str, Any]] = [
     },
     {
         "name": "correlate",
-        "description": "Per-country Pearson correlation between two indicators, optionally with indicator_a leading by `lag` years. Correlation is not causation.",
+        "description": "Per-country Pearson correlation between two indicators, on year-over-year GROWTH RATES by default (so two series that both merely trend upward do NOT read as correlated). Optionally with indicator_a leading by `lag` years. Pass on='levels' only if you specifically want raw-level correlation (which is inflated by shared trends). State that you are quoting growth-rate correlation, and that correlation is not causation.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "indicator_a": {"type": "string"},
                 "indicator_b": {"type": "string"},
                 "lag": {"type": "integer", "default": 0},
+                "on": {"type": "string", "enum": ["growth", "levels"], "default": "growth",
+                       "description": "'growth' (default) correlates YoY growth rates; 'levels' correlates raw levels (trend-inflated)."},
             },
             "required": ["indicator_a", "indicator_b"],
         },
@@ -391,8 +393,12 @@ def _dispatch(ed: EuroData, name: str, args: dict[str, Any]) -> ToolOutcome:
 
     if name == "correlate":
         lag = int(args.get("lag", 0))
-        df = ed.lagged_correlation(args["indicator_a"], args["indicator_b"], lag=lag)
+        on = args.get("on", "growth")
+        if on not in ("growth", "levels"):
+            on = "growth"
+        df = ed.lagged_correlation(args["indicator_a"], args["indicator_b"], lag=lag, on=on)
         rows = df_records(df)
+        basis = "YoY growth rates" if on == "growth" else "raw levels (trend-inflated)"
         chart = {
             "kind": "bar",
             "unit": "Pearson r",
@@ -402,11 +408,12 @@ def _dispatch(ed: EuroData, name: str, args: dict[str, Any]) -> ToolOutcome:
             }],
         } if rows else None
         return ToolOutcome(
-            payload={"n_countries": len(rows), "rows_sample": rows[:MAX_MODEL_ROWS]},
+            payload={"n_countries": len(rows), "basis": on, "rows_sample": rows[:MAX_MODEL_ROWS]},
             chart=chart,
             table=df_table(df),
             indicators=[args["indicator_a"], args["indicator_b"]],
-            warnings=["Correlation is not causation: per-country Pearson correlations over yearly values, with Fisher-z 95% CIs; p-values are unadjusted for multiple comparisons."],
+            warnings=[f"Correlation is not causation: per-country Pearson correlations on {basis}, "
+                      "with Fisher-z 95% CIs; p-values are unadjusted for multiple comparisons."],
         )
 
     if name == "forecast":

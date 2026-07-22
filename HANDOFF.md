@@ -1,5 +1,27 @@
 # eurodata — Session Handoff
 
+> **Update (2026-07-22, PR2 — revisions API + backend hardening).** Stacked on
+> PR1. New public API: `revisions(indicator, country)` (full vintage-by-vintage
+> trail from `statistic_record`, with a per-period summary in `df.attrs`),
+> `revisions_summary(country?, indicator?)` (one row per revised
+> indicator/country/period — feeds the /revisions browse view), and
+> `country_correlations(country)` (walks the FDR-surviving graph pairs and
+> computes *this country's* growth-rate r, so country pages stop showing
+> Europe-wide edges as local). `correlate()`/`lagged_correlation()` now default
+> to **YoY growth** (`on="growth"`; `on="levels"` still available) so two
+> trending series no longer read ~0.99; the chat `correlate` tool description
+> was updated to match. New endpoints: `/api/revisions`,
+> `/api/revisions-summary`, `/api/country-correlations`, `/api/export`
+> (CSV/Parquet for series/latest/compare/coverage/revisions-summary),
+> `years_stale` now flows through `/api/coverage`. `/api/countries` and
+> `/api/indicators` carry an ETag/Cache-Control keyed on the latest vintage
+> (304 on `If-None-Match`). `/api/chat` is rate-limited per IP (429 +
+> `Retry-After`; `CHAT_RATE_LIMIT`/`CHAT_RATE_WINDOW`, default 20/60s).
+> `deps.py` dropped the global `threading.Lock` for per-request DuckDB cursors
+> over one shared read-only connection (concurrent readers). Tests:
+> `tests/test_web_endpoints.py` (in-memory injected DB, no real data needed) +
+> new api coverage. Suite: 87 passing, 34 skipped (real-DB fixtures).
+
 > **Update (2026-07-22, PR1 — data-integrity sentinel): the `statistic_record`
 > UNIQUE constraint now actually fires.** `quarter`/`month` were nullable, so
 > every key carried a NULL and (since `NULL != NULL`) the constraint — and the
