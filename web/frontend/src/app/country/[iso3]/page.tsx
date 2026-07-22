@@ -55,9 +55,8 @@ export default function CountryProfile() {
         ),
       ),
       api<{ rows: Row[] }>(`/api/events?country=${iso3}`),
-      api<{ rows: Row[] }>(`/api/country-indicators?country=${iso3}`),
     ])
-      .then(([countriesRes, blocsRes, kpiEntries, eventsRes, indicatorsRes]) => {
+      .then(([countriesRes, blocsRes, kpiEntries, eventsRes]) => {
         if (cancelled) return;
         const match = countriesRes.rows.find((r) => r.iso3 === iso3);
         setCountry(match ?? null);
@@ -80,22 +79,20 @@ export default function CountryProfile() {
             .slice(0, 6),
         );
 
-        const ownIndicators = new Set(indicatorsRes.rows.map((r) => String(r.indicator)));
-        return api<{ rows: Row[] }>("/api/correlation-graph").then((graphRes) => {
+        // Genuinely local: this country's own growth-rate correlation for the
+        // pairs the structural graph flagged as significant across Europe.
+        return api<{ rows: Row[] }>(
+          `/api/country-correlations?country=${iso3}`,
+        ).then((ccRes) => {
           if (cancelled) return;
-          const top = graphRes.rows
-            .filter(
-              (r) =>
-                ownIndicators.has(String(r.indicator_a)) &&
-                ownIndicators.has(String(r.indicator_b)) &&
-                !sameUnderlyingSeries(String(r.indicator_a), String(r.indicator_b)),
-            )
+          const top = ccRes.rows
+            .filter((r) => !sameUnderlyingSeries(String(r.indicator_a), String(r.indicator_b)))
             .map((r) => ({
               a: String(r.indicator_a),
               b: String(r.indicator_b),
-              weight: Number(r.weight),
+              weight: Number(r.correlation),
               arrow:
-                r.direction === "a_leads_b" ? "→" : r.direction === "b_leads_a" ? "←" : "↔",
+                r.relationship === "a_leads_b" ? "→" : r.relationship === "b_leads_a" ? "←" : "↔",
             }))
             .sort((x, y) => Math.abs(y.weight) - Math.abs(x.weight))
             .slice(0, 8);
@@ -229,11 +226,11 @@ export default function CountryProfile() {
 
             <section>
               <h2 className="text-sm font-semibold">Strongest correlations</h2>
-              {/* correlation_graph is pooled across all countries — these are
-                  Europe-wide relationships, narrowed to indicators this country
-                  has data for, NOT correlations computed on its own series. */}
+              {/* Per-country: the country's own YoY-growth correlation for the
+                  indicator pairs the structural graph flagged as significant
+                  across Europe. */}
               <p className="mt-1 text-xs text-black/40 dark:text-white/40">
-                Europe-wide, among indicators covered for {String(country.name)}
+                {String(country.name)}&rsquo;s own growth-rate correlations
               </p>
               {correlations.length ? (
                 <ul className="mt-3 space-y-2">

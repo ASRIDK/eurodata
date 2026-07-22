@@ -22,6 +22,7 @@ export default function Correlations() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-change: flip loading/clear error when the indicator filter changes
     setLoading(true);
     setError(null);
     const params = new URLSearchParams();
@@ -189,6 +190,7 @@ function TrendComparison({ a, b }: { a: string; b: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-change: reset the trend to its loading state when the pair changes
     setRows(null);
     setError(null);
     const params = new URLSearchParams({ indicators: `${a},${b}` });
