@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import logging
+import time
+
 from eurodata.reference.countries import COUNTRIES
 from eurodata.sources.base import BaseFetcher, Record
 from eurodata.sources.registry import register
+
+logger = logging.getLogger(__name__)
+
+_RETRIES = 3
 
 _EUROPE_ISO3 = {c["iso3"] for c in COUNTRIES}
 
@@ -77,17 +84,36 @@ class WorldBankFetcher(BaseFetcher):
         records: list[Record] = []
         economies = [c["iso3"] for c in COUNTRIES]
         end_year = dt.date.today().year + 1  # include the current year
-        for eu_code, wb_code in self.WB_CODES.items():
-            try:
-                df = wb.data.DataFrame(wb_code, economies, range(start_year, end_year),
-                                       labels=False).reset_index()
-                rows = []
-                for _, r in df.iterrows():
-                    for col in df.columns:
-                        if str(col).startswith("YR"):
-                            rows.append({"countryiso3code": r["economy"],
-                                         "date": str(col)[2:], "value": r[col]})
-                records.extend(normalize_world_bank(rows, eu_code))
-            except Exception as exc:  # noqa: BLE001 — recorded, not swallowed
-                self.errors.append((wb_code, str(exc)))
+        for i, (eu_code, wb_code) in enumerate(self.WB_CODES.items()):
+            if i > 0:
+                # WB's API returns intermittent 502/503/504 when ~30 series
+                # are requested back-to-back with no pacing (each call fans
+                # out to 2 paginated requests); a small gap between series
+                # avoids tripping it.
+                time.sleep(1)
+            last_exc: Exception | None = None
+            for attempt in range(_RETRIES):
+                try:
+                    df = wb.data.DataFrame(wb_code, economies, range(start_year, end_year),
+                                           labels=False).reset_index()
+                    rows = []
+                    for _, r in df.iterrows():
+                        for col in df.columns:
+                            if str(col).startswith("YR"):
+                                rows.append({"countryiso3code": r["economy"],
+                                             "date": str(col)[2:], "value": r[col]})
+                    records.extend(normalize_world_bank(rows, eu_code))
+                    last_exc = None
+                    break
+                except Exception as exc:  # noqa: BLE001 — retried, then recorded
+                    last_exc = exc
+                    if attempt < _RETRIES - 1:
+                        # a cold cache on WB's side can take ~50s to compute a
+                        # wide country/year query, during which the gateway
+                        # returns 502/503/504; back off long enough to clear it
+                        logger.warning("World Bank %s attempt %d/%d failed: %s",
+                                      wb_code, attempt + 1, _RETRIES, exc)
+                        time.sleep(20 * (attempt + 1))
+            if last_exc is not None:
+                self.errors.append((wb_code, str(last_exc)))
         return records
