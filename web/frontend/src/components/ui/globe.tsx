@@ -244,6 +244,8 @@ export function Globe({
     >
       <canvas
         ref={canvasRef}
+        role="img"
+        aria-label="Interactive 3D globe highlighting European countries. A text list of countries, each linking to its data, is available below for keyboard and screen-reader access."
         className="size-full cursor-grab opacity-0 transition-opacity duration-500 [contain:layout_paint_size] [touch-action:pan-y]"
         onPointerDown={(e) => {
           // Vertical drag tilts (theta) on mouse/pen only — touch keeps
