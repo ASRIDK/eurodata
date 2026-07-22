@@ -189,28 +189,88 @@ def test_event_study_before_after(db):
 
 
 def test_correlate_and_lag(db):
-    r0 = db.correlate("GDP", "GDP")
+    # These use raw levels: the fixture builds GDP per capita as a 2-year-shifted
+    # copy of R&D, a level-space relationship.
+    r0 = db.correlate("GDP", "GDP", on="levels")
     assert ((r0["correlation"] - 1.0).abs() < 1e-9).all()
     lagged = db.lagged_correlation("R&D Expenditure (% GDP)", "GDP per capita",
-                                   lag=2)
+                                   lag=2, on="levels")
     ita = lagged[lagged["iso3"] == "ITA"].iloc[0]
     assert ita["correlation"] == pytest.approx(1.0)
     # at lag 0 the series are shifted copies -> correlation clearly below 1
     # (min_years=5: only 9 overlapping years remain at lag 0)
     lag0 = db.lagged_correlation("R&D Expenditure (% GDP)", "GDP per capita",
-                                 lag=0, min_years=5)
+                                 lag=0, min_years=5, on="levels")
     assert lag0[lag0["iso3"] == "ITA"]["correlation"].iloc[0] < 0.9
 
 
+def test_correlate_defaults_to_growth(db):
+    # Default basis is YoY growth; the transform drops one year per country.
+    default = db.correlate("GDP", "GDP")
+    levels = db.correlate("GDP", "GDP", on="levels")
+    assert default.attrs["basis"] == "growth"
+    assert levels.attrs["basis"] == "levels"
+    # GDP vs itself is perfectly correlated either way, but growth loses a year.
+    assert ((default["correlation"] - 1.0).abs() < 1e-9).all()
+    assert int(default["n_years"].iloc[0]) == int(levels["n_years"].iloc[0]) - 1
+
+
 def test_correlation_stats(db):
-    r0 = db.correlate("GDP", "GDP")
+    r0 = db.correlate("GDP", "GDP", on="levels")
     row = r0.iloc[0]
     # a perfect correlation over 11 years: p ~ 0, CI hugging 1
     assert row["p_value"] < 1e-6
     assert row["ci_low"] > 0.99 and row["ci_high"] >= row["ci_low"]
-    # default min_years=10 drops the 9-year overlap at lag 0
+    # default (growth, min_years=10) drops the short overlap at lag 0
     lag0 = db.lagged_correlation("R&D Expenditure (% GDP)", "GDP per capita")
     assert "ITA" not in set(lag0["iso3"])
+
+
+def test_revisions_trail_and_summary(db):
+    con = db.con
+    # FRA GDP was loaded at vintage 2026-01-01; re-report 2015 at a later
+    # vintage with a different value -> exactly one revised period.
+    load_records(con, "World Bank", [Record("FRA", "nama_10_gdp", 2015, 999.0)],
+                 vintage=dt.date(2027, 1, 1))
+    rev = db.revisions("GDP", "FRA")
+    assert rev.attrs["n_revised"] == 1
+    row_2015 = rev[(rev["period"] == "2015") & (rev["is_latest"])].iloc[0]
+    assert row_2015["value"] == 999.0
+    assert not pd.isna(row_2015["previous_value"]) and row_2015["delta"] != 0
+    assert set(rev.attrs["summary"]["period"]) == {"2015"}
+
+    all_rev = db.revisions_summary()
+    assert (all_rev["indicator"] == "GDP").any()
+    fra = db.revisions_summary(country="FRA")
+    assert set(fra["period"]) >= {"2015"}
+    # an un-revised series has an empty trail
+    assert db.revisions("GDP", "DEU").attrs["n_revised"] == 0
+
+
+def test_country_correlations_are_local(db):
+    con = db.con
+    # Inject one CORRELATES_WITH edge for a pair ITA has both series for, so the
+    # walk has a pair to score; the per-country r is computed locally.
+    a, b = "R&D Expenditure (% GDP)", "GDP per capita"
+    ids = dict(con.execute(
+        "SELECT name, id FROM indicator WHERE name IN (?, ?)", [a, b]).fetchall())
+    con.execute("INSERT INTO graph_node (id, node_type, ref_id, label) VALUES "
+                "(901,'indicator',?,?), (902,'indicator',?,?)",
+                [ids[a], a, ids[b], b])
+    import json
+    props = json.dumps({"relationship": "contemporaneous", "direction": "undetermined",
+                        "q_value": 0.01, "n_countries": 5})
+    con.execute("INSERT INTO graph_edge (src_node_id, dst_node_id, edge_type, weight, props) "
+                "VALUES (901, 902, 'CORRELATES_WITH', 0.9, ?)", [props])
+    cc = db.country_correlations("ITA", min_years=3)
+    assert list(cc.columns)[:5] == ["indicator_a", "indicator_b", "domain_a",
+                                    "domain_b", "correlation"]
+    assert len(cc) == 1
+    assert cc.iloc[0]["relationship"] == "contemporaneous"
+    assert -1.0 <= cc.iloc[0]["correlation"] <= 1.0
+    # unknown country still raises the usual lookup error
+    with pytest.raises(EuroDataLookupError):
+        db.country_correlations("Atlantis")
 
 
 def test_sub_annual_series_periods(db):
