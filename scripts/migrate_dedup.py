@@ -79,11 +79,16 @@ FROM (
 WHERE rn = 1;
 """
 
-# A few series that must be byte-for-byte identical before and after.
+# A few series that must be byte-for-byte identical before and after. These
+# names must match `indicator.name` exactly: a name that resolves to nothing
+# samples [] both before and after and the equality check passes vacuously,
+# which is worth guarding because the sub-annual series are exactly where the
+# quarter/month sentinel conversion happens. _assert_samples_resolve() below
+# turns a typo into a loud failure instead of a silent no-op.
 _SAMPLE_SERIES = [
-    ("GDP", "FRA"),
-    ("Inflation (HICP)", "ESP"),
-    ("GDP growth", "DEU"),
+    ("GDP", "FRA"),                      # annual        (quarter=0, month=0)
+    ("Inflation (HICP, monthly)", "ESP"),  # monthly     (quarter=0, month=1-12)
+    ("GDP Growth (quarterly)", "DEU"),   # quarterly     (quarter=1-4, month=0)
 ]
 
 
@@ -100,6 +105,17 @@ def _sample(con: duckdb.DuckDBPyConnection, indicator: str, iso3: str):
         "ORDER BY s.year, s.quarter, s.month",
         [iso3, indicator],
     ).fetchall()
+
+
+def _assert_samples_resolve(con: duckdb.DuckDBPyConnection) -> None:
+    """Fail loudly if a sample series names an indicator/country that does not
+    exist -- otherwise it compares [] to [] and silently proves nothing."""
+    for indicator, iso3 in _SAMPLE_SERIES:
+        if not _sample(con, indicator, iso3):
+            raise RuntimeError(
+                f"Sample series {indicator!r}/{iso3} returned no rows before "
+                f"migrating, so it cannot witness a value change. Fix the name "
+                f"in _SAMPLE_SERIES (it must match indicator.name exactly).")
 
 
 def migrate(con: duckdb.DuckDBPyConnection) -> dict:
@@ -141,6 +157,9 @@ def main(argv: list[str]) -> int:
 
     con = duckdb.connect(db_path)
     try:
+        # Only on a real database: the unit tests drive migrate() against a
+        # synthetic fixture that deliberately carries just one indicator.
+        _assert_samples_resolve(con)
         result = migrate(con)
     except Exception as exc:  # noqa: BLE001 - surface and keep the backup
         print(f"FAILED: {exc}", file=sys.stderr)
