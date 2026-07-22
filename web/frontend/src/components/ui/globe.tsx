@@ -12,12 +12,21 @@ import type { CountryMarker } from "@/components/european-markers";
 // math for a square canvas so clicks and popups can be mapped to exact marker
 // screen positions using the current phi/theta/scale.
 
-const THETA_INIT = 0.4; // initial tilt toward the northern hemisphere
+// The centre of the visible disc sits at latitude ~= theta (radians). At 0.4
+// (23°N) that centred the Sahara and pushed Europe off the top edge; 0.80
+// (~46°N) frames the continent, keeping Scandinavia and the Mediterranean in
+// view together.
+const THETA_INIT = 0.8;
 // Clamp range for free vertical drag — stays short of the poles so the globe
 // never flips upside down or rotates through a degenerate view.
 const THETA_MIN = -1.4;
 const THETA_MAX = 1.4;
 const MARKER_RADIUS = 0.85; // 0.8 sphere + 0.05 default markerElevation
+// cobe sizes markers as a fraction of the globe, and the hero globe is far
+// wider than the viewport — at the catalog's authored sizes the dots rendered
+// ~45px across and merged into blobs over dense western Europe. Scale them
+// down here rather than rewriting all 56 catalog entries.
+const MARKER_SCALE = 0.34;
 // phi that puts ~10°E (central Europe) at the front-center of the globe
 const EUROPE_PHI = 4.54;
 const AUTO_SPEED = 0.005;
@@ -88,6 +97,9 @@ export function Globe({
   const callbacksRef = useRef({ onMarkerClick, onBackgroundClick });
   const globeRef = useRef<ReturnType<typeof createGlobe> | null>(null);
   const [dark, setDark] = useState<boolean | null>(null);
+  // Only eight anchors carry a resting label; every other marker reveals its
+  // name on hover, which keeps dense western Europe readable at rest.
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   pausedRef.current = paused;
   speedRef.current = rotateSpeed;
@@ -111,7 +123,7 @@ export function Globe({
       location: m.location,
       // Selected marker grows too, on top of its color swap, so the
       // "pointed" country is unambiguous even before the popup renders.
-      size: (m.id === selected ? m.size * 1.6 : m.size) / scale,
+      size: ((m.id === selected ? m.size * 1.7 : m.size) * MARKER_SCALE) / scale,
       id: m.id,
       ...(m.id === selected ? { color: EMERALD } : {}),
     }));
@@ -247,7 +259,17 @@ export function Globe({
         }}
         onPointerMove={(e) => {
           const drag = draggingRef.current;
-          if (!drag) return;
+          if (!drag) {
+            // Not dragging: hit-test under the cursor so the marker can name
+            // itself. Mouse/pen only — a touch "hover" would fire on tap and
+            // fight the popup.
+            if (e.pointerType !== "touch") {
+              const hit = markerAtPoint(e.clientX, e.clientY);
+              setHoveredId(hit?.id ?? null);
+              e.currentTarget.style.cursor = hit ? "pointer" : "grab";
+            }
+            return;
+          }
           const delta = e.clientX - drag.startX;
           const deltaY = drag.mouse ? e.clientY - drag.startY : 0;
           if (!drag.moved && (Math.abs(delta) > 5 || Math.abs(deltaY) > 5)) {
@@ -277,7 +299,9 @@ export function Globe({
             else callbacksRef.current.onBackgroundClick?.();
           }
         }}
+        onPointerLeave={() => setHoveredId(null)}
         onPointerCancel={() => {
+          setHoveredId(null);
           draggingRef.current = null;
           phiRef.current += dragDeltaRef.current / DRAG_SENSITIVITY;
           thetaRef.current = clamp(
@@ -290,7 +314,7 @@ export function Globe({
         }}
       />
       {markers
-        .filter((m) => m.labeled)
+        .filter((m) => m.labeled || m.id === hoveredId || m.id === selectedId)
         .map((m) => (
           <button
             key={m.id}
