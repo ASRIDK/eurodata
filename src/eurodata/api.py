@@ -189,6 +189,17 @@ class EuroData:
             "JOIN geography g ON g.id = gb.geography_id "
             "WHERE b.code = ? ORDER BY gb.since_year, g.name", [code.upper()])
 
+    def country_blocs(self, country: str) -> pd.DataFrame:
+        """Every bloc a country currently belongs to or has historically
+        belonged to. Columns: bloc_code, bloc_name, since_year, until_year
+        (NULL = still a member)."""
+        geo_id = self._resolve_country(country)
+        return self.query(
+            "SELECT b.code AS bloc_code, b.name AS bloc_name, "
+            "gb.since_year, gb.until_year "
+            "FROM geography_bloc gb JOIN bloc b ON b.id = gb.bloc_id "
+            "WHERE gb.geography_id = ? ORDER BY gb.since_year", [geo_id])
+
     def domains(self) -> pd.DataFrame:
         return self.query("SELECT name, description FROM domain ORDER BY id")
 
@@ -352,6 +363,44 @@ class EuroData:
         return (df.loc[idx].sort_values("value", ascending=False)
                   .reset_index(drop=True))
 
+    def provenance(self, indicator: str, country: str) -> pd.DataFrame:
+        """Per-source values for one indicator/country, latest vintage of
+        each source (not deduplicated to a single "best" source the way
+        `series()` is). Use this to see where sources disagree — e.g. a
+        proxy indicator where Eurostat and World Bank report different
+        numbers for the same country/year.
+
+        Columns: period, year, t, source, value, unit, reliability_score,
+        is_best (whether this row is the one `statistic_best`/`series()`
+        would surface).
+        """
+        ind_id = self._resolve_indicator(indicator)
+        geo_id = self._resolve_country(country)
+        df = self.query(
+            "SELECT CASE WHEN s.month IS NOT NULL THEN printf('%d-%02d', s.year, s.month) "
+            "            WHEN s.quarter IS NOT NULL THEN printf('%d-Q%d', s.year, s.quarter) "
+            "            ELSE CAST(s.year AS VARCHAR) END AS period, "
+            "       s.year, "
+            "       s.year + CASE WHEN s.month IS NOT NULL THEN (s.month - 1) / 12.0 "
+            "                     WHEN s.quarter IS NOT NULL THEN (s.quarter - 1) / 4.0 "
+            "                     ELSE 0.0 END AS t, "
+            "       src.name AS source, s.value, COALESCE(s.unit, i.unit) AS unit, "
+            "       src.reliability_score "
+            "FROM statistic_current s "
+            "JOIN source src ON src.id = s.source_id "
+            "JOIN indicator i ON i.id = s.indicator_id "
+            "WHERE s.indicator_id = ? AND s.geography_id = ? "
+            # Re-ingestion can insert several identical rows for the same
+            # source/period on one vintage date; collapse those before
+            # showing "which sources disagree" — repeats aren't disagreement.
+            "GROUP BY period, s.year, t, src.name, s.value, COALESCE(s.unit, i.unit), "
+            "src.reliability_score "
+            "ORDER BY t, src.reliability_score DESC", [ind_id, geo_id])
+        if df.empty:
+            return df.assign(is_best=pd.Series(dtype=bool))
+        df["is_best"] = ~df.duplicated("period", keep="first")
+        return df
+
     def compare(self, countries: list[str], indicator: str, *,
                 start: int | None = None, end: int | None = None) -> pd.DataFrame:
         """Wide period x country table for one indicator (index: year for
@@ -436,6 +485,20 @@ class EuroData:
             {where}
             GROUP BY i.name, d.name, i.is_proxy, d.id, i.id
             ORDER BY d.id, i.id""", params)
+
+    def country_indicators(self, country: str) -> pd.DataFrame:
+        """Indicators with at least one data point for this country/region,
+        with each indicator's most recent value. Used to scope which
+        indicators/correlations are actually relevant to a given country."""
+        geo_id = self._resolve_country(country)
+        return self.query(
+            "SELECT i.name AS indicator, d.name AS domain, "
+            "MAX(s.year) AS last_year "
+            "FROM statistic_best s "
+            "JOIN indicator i ON i.id = s.indicator_id "
+            "JOIN domain d ON d.id = i.domain_id "
+            "WHERE s.geography_id = ? "
+            "GROUP BY i.name, d.name, i.id, d.id ORDER BY d.id, i.name", [geo_id])
 
     def ingestion_summary(self) -> pd.DataFrame:
         """Recent ingestion runs with status and per-series error counts."""
@@ -678,6 +741,9 @@ years = _delegate("years")
 search_indicators = _delegate("search_indicators")
 series = _delegate("series")
 latest = _delegate("latest")
+provenance = _delegate("provenance")
+country_blocs = _delegate("country_blocs")
+country_indicators = _delegate("country_indicators")
 compare = _delegate("compare")
 forecast = _delegate("forecast")
 coverage = _delegate("coverage")
@@ -694,7 +760,8 @@ relation = _delegate("relation")
 __all__ = [
     "EuroData", "EuroDataLookupError", "open",
     "countries", "blocs", "bloc_members", "domains", "indicators", "sources",
-    "years", "search_indicators", "series", "latest", "compare", "forecast", "coverage",
+    "years", "search_indicators", "series", "latest", "provenance",
+    "country_blocs", "country_indicators", "compare", "forecast", "coverage",
     "ingestion_summary", "events", "event_types", "event_study",
     "correlate", "lagged_correlation", "indicator_trends", "correlation_graph",
     "query", "relation",
