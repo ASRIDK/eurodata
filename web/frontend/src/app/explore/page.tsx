@@ -1,7 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { BlockChart } from "@/components/block-chart-lazy";
 import { DataTable } from "@/components/data-table";
@@ -36,14 +36,31 @@ export default function Explore() {
   const [forecasts, setForecasts] = useState<
     Record<string, { forecast: { t: number; period: string; value: number; lo: number; hi: number }[]; disclaimer: string; method: string; backtest_mae: number | null; unit: string | null }>
   >({});
+  // Skip the very first URL-sync so the mount-time read (below) wins; only
+  // user-driven changes after that rewrite the query string.
+  const firstSyncRef = useRef(true);
 
   useEffect(() => {
-    // deep link from the home-page globe popup: /explore?country=FRA.
-    // Read post-hydration (an initializer would mismatch the prerendered
-    // HTML); a one-shot mount read cannot cascade.
-    const c = new URLSearchParams(window.location.search).get("country")?.toUpperCase();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (c && /^[A-Z]{3}$/.test(c)) setSelected([c]);
+    // Shareable/bookmarkable state, read post-hydration (an initializer would
+    // mismatch the prerendered HTML); a one-shot mount read cannot cascade.
+    // Accepts /explore?indicator=GDP&country=FRA,DEU&forecast=1&horizon=5
+    // (the home-page globe popup deep-links with just ?country=FRA).
+    const sp = new URLSearchParams(window.location.search);
+    const indParam = sp.get("indicator");
+    const countryParam = sp.get("country");
+    const hz = Number(sp.get("horizon"));
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (indParam) setIndicator(indParam);
+    if (countryParam) {
+      const list = countryParam
+        .split(",")
+        .map((s) => s.trim().toUpperCase())
+        .filter((s) => /^[A-Z0-9]{3,5}$/.test(s));
+      if (list.length) setSelected(list);
+    }
+    if (sp.get("forecast") === "1") setShowForecast(true);
+    if ([3, 5, 10].includes(hz)) setHorizon(hz);
+    /* eslint-enable react-hooks/set-state-in-effect */
     Promise.all([
       api<{ rows: Row[] }>("/api/countries"),
       api<{ rows: Row[] }>("/api/indicators"),
@@ -69,6 +86,25 @@ export default function Explore() {
       })
       .catch((e) => setError(e.message));
   }, []);
+
+  // Mirror the current selection into the query string so the view is
+  // shareable/bookmarkable. replaceState (not push) keeps it out of history;
+  // no setState here, so it can't cascade.
+  useEffect(() => {
+    if (firstSyncRef.current) {
+      firstSyncRef.current = false;
+      return;
+    }
+    const sp = new URLSearchParams();
+    if (indicator) sp.set("indicator", indicator);
+    if (selected.length) sp.set("country", selected.join(","));
+    if (showForecast) {
+      sp.set("forecast", "1");
+      if (horizon !== 5) sp.set("horizon", String(horizon));
+    }
+    const qs = sp.toString();
+    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+  }, [indicator, selected, showForecast, horizon]);
 
   const isRegional = nutsIndicators.has(indicator);
 
