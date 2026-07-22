@@ -73,6 +73,23 @@ def test_latest_ranked():
     assert values == sorted(values, reverse=True)
 
 
+def test_provenance_route():
+    rows = client.get("/api/provenance", params={
+        "indicator": "Broadband Coverage %", "country": "ALB",
+    }).json()["rows"]
+    assert rows and {"period", "source", "value", "reliability_score", "is_best"} <= set(rows[0])
+
+
+def test_country_blocs_route():
+    rows = client.get("/api/country-blocs", params={"country": "FRA"}).json()["rows"]
+    assert {"EU", "EUROZONE"} <= {r["bloc_code"] for r in rows}
+
+
+def test_country_indicators_route():
+    rows = client.get("/api/country-indicators", params={"country": "DEU"}).json()["rows"]
+    assert rows and "GDP" in {r["indicator"] for r in rows}
+
+
 def test_forecast_route():
     r = client.get("/api/forecast",
                    params={"indicator": "GDP per capita", "country": "FRA",

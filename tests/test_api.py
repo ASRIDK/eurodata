@@ -103,6 +103,48 @@ def test_latest_and_compare(db):
     assert list(wide.columns) == ["DEU", "FRA"] and len(wide) == 3
 
 
+def test_provenance_multi_source(db):
+    # DEU GDP 2015 already has a World Bank row (100.0 + 10*5 = 150.0);
+    # add a disagreeing Eurostat row for the same period.
+    load_records(db.con, "Eurostat",
+                 [Record("DEU", "nama_10_gdp", 2015, 999.0)],
+                 vintage=dt.date(2026, 1, 1))
+    prov = db.provenance("GDP", "DEU")
+    row_2015 = prov[prov["period"] == "2015"]
+    assert set(row_2015["source"]) == {"World Bank", "Eurostat"}
+    # Eurostat (0.95) outranks World Bank (0.90)
+    best = row_2015[row_2015["is_best"]]
+    assert len(best) == 1 and best.iloc[0]["source"] == "Eurostat"
+    assert best.iloc[0]["value"] == 999.0
+    # a period with only one source has exactly one (best) row
+    row_2010 = prov[prov["period"] == "2010"]
+    assert len(row_2010) == 1 and bool(row_2010.iloc[0]["is_best"])
+
+
+def test_provenance_dedupes_repeat_ingestion(db):
+    # Re-ingesting the same source/value on the same vintage date must not
+    # create phantom "disagreement" rows.
+    load_records(db.con, "World Bank",
+                 [Record("DEU", "nama_10_gdp", 2011, 110.0)],
+                 vintage=dt.date(2026, 1, 1))
+    prov = db.provenance("GDP", "DEU")
+    row_2011 = prov[prov["period"] == "2011"]
+    assert len(row_2011) == 1
+
+
+def test_country_blocs(db):
+    cb = db.country_blocs("FRA")
+    assert {"EU", "EUROZONE", "SCHENGEN", "NATO"} <= set(cb["bloc_code"])
+    assert (cb["until_year"].isna()).all()  # all current memberships
+
+
+def test_country_indicators(db):
+    ci = db.country_indicators("DEU")
+    names = set(ci["indicator"])
+    assert "GDP" in names and "Unemployment Rate" in names
+    assert "GDP" not in set(db.country_indicators("ITA")["indicator"])
+
+
 def test_coverage_includes_empty(db):
     cov = db.coverage()
     assert len(cov) == 48
