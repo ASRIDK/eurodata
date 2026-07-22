@@ -1,11 +1,20 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { CountryPopup, KPI_INDICATORS, type KpiData } from "@/components/country-popup";
 import { EUROPEAN_MARKERS, type CountryMarker } from "@/components/european-markers";
-import { Globe } from "@/components/ui/globe";
 import { api, type Row } from "@/lib/api";
+
+// cobe (WebGL globe rendering) is only needed once this component mounts on
+// the home page — keep it out of every other route's bundle.
+const Globe = dynamic(() => import("@/components/ui/globe").then((m) => m.Globe), {
+  ssr: false,
+  loading: () => (
+    <div className="aspect-square w-[135vmax] max-w-none animate-pulse rounded-full bg-black/5 dark:bg-white/5" />
+  ),
+});
 
 type KpiCache = Map<string, Map<string, Row>>;
 
@@ -117,7 +126,10 @@ export function GlobeHero() {
         willChange: "transform",
       }}
     >
-      <div className="relative w-[135vmin] max-w-none shrink-0">
+      {/* vmax (not vmin): a square sized off the larger viewport dimension
+          always overflows both edges, so the globe is edge-to-edge full-bleed
+          at any aspect ratio instead of leaving gutters on wide screens. */}
+      <div className="relative w-[135vmax] max-w-none shrink-0">
         <Globe
           className="max-w-none"
           markers={EUROPEAN_MARKERS}
