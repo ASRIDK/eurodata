@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { AssistantBlocks } from "@/components/assistant-blocks";
 import { AIInput } from "@/components/ui/ai-input";
-import { sendChat, type ChatTurn } from "@/lib/api";
+import { ApiError, sendChat, type ChatTurn } from "@/lib/api";
 
 const EXAMPLES = [
   "Compare unemployment in France, Germany and Italy",
@@ -17,27 +17,46 @@ export default function Chat() {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [turns, loading]);
+
+  // Abort an in-flight request if the user navigates away mid-answer.
+  useEffect(() => () => controllerRef.current?.abort(), []);
 
   const send = async (text: string) => {
     if (loading) return;
     const history: ChatTurn[] = [...turns, { role: "user", text }];
     setTurns(history);
     setLoading(true);
+    cancelledRef.current = false;
+    const controller = new AbortController();
+    controllerRef.current = controller;
     try {
-      const blocks = await sendChat(history);
+      const blocks = await sendChat(history, { signal: controller.signal });
       setTurns([...history, { role: "assistant", blocks }]);
     } catch (e) {
-      setTurns([
-        ...history,
-        { role: "assistant", error: e instanceof Error ? e.message : String(e) },
-      ]);
+      if (!cancelledRef.current) {
+        const message =
+          e instanceof ApiError && e.status === 429
+            ? `Rate limited — try again in ${e.retryAfterSeconds ?? 30}s.`
+            : e instanceof Error
+              ? e.message
+              : String(e);
+        setTurns([...history, { role: "assistant", error: message }]);
+      }
     } finally {
+      controllerRef.current = null;
       setLoading(false);
     }
+  };
+
+  const cancel = () => {
+    cancelledRef.current = true;
+    controllerRef.current?.abort();
   };
 
   return (
@@ -95,6 +114,13 @@ export default function Chat() {
                 <Dot delay="150ms" />
                 <Dot delay="300ms" />
                 <span className="ml-2 text-xs">consulting the dataset…</span>
+                <button
+                  type="button"
+                  onClick={cancel}
+                  className="ml-2 text-xs underline underline-offset-2 hover:text-black/70 dark:hover:text-white/70"
+                >
+                  Cancel
+                </button>
               </div>
             ) : null}
             <div ref={bottomRef} />
