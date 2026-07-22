@@ -1,6 +1,7 @@
 import datetime as dt
 
 import duckdb
+import pandas as pd
 import pytest
 
 import eurodata as ed
@@ -150,6 +151,18 @@ def test_coverage_includes_empty(db):
     assert len(cov) == 48
     medage = cov[cov["indicator"] == "Median Age"].iloc[0]
     assert medage["rows"] == 0
+
+
+def test_coverage_years_stale(db):
+    this_year = dt.date.today().year
+    cov = db.coverage()
+    assert "years_stale" in cov.columns
+    gdp = cov[cov["indicator"] == "GDP"].iloc[0]        # data runs to 2020
+    assert gdp["last_year"] == 2020
+    assert gdp["years_stale"] == this_year - 2020
+    # Empty indicators have no last year, hence no staleness.
+    medage = cov[cov["indicator"] == "Median Age"].iloc[0]
+    assert pd.isna(medage["years_stale"])
 
 
 def test_events_filters(db):
