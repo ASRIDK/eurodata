@@ -13,12 +13,14 @@ import {
   LineChart,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Scatter,
   ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
+  type LabelProps,
 } from "recharts";
 
 import type { ChartSpec } from "@/lib/api";
@@ -174,54 +176,102 @@ export function BlockChart({
   const hasBand = spec.series.some((s) => s.band && s.band.length > 0);
   const Chart = spec.kind === "area" ? AreaChart : hasBand ? ComposedChart : LineChart;
   return (
-    <ChartFrame unit={spec.unit} title={spec.title}>
-      <Chart data={data} margin={{ left: 8, right: 8 }}>
-        <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.3} />
-        <XAxis dataKey="x" fontSize={11} />
-        <YAxis fontSize={11} tickFormatter={compactNumber} width={55} />
-        <Tooltip formatter={(v, name) => [compactNumber(v), <FlagName key="n" value={name} />]} />
-        <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => <FlagName value={v} />} />
-        {spec.series.map((s, i) =>
-          s.band ? (
-            <Area
-              key={`${s.name}__band`}
-              dataKey={`${s.name}__band`}
-              stroke="none"
-              fill={s.color ?? COLORS[i % COLORS.length]}
-              fillOpacity={0.12}
-              legendType="none"
-              tooltipType="none"
-              connectNulls
-              isAnimationActive={false}
+    <>
+      <ChartFrame unit={spec.unit} title={spec.title}>
+        <Chart data={data} margin={{ left: 8, right: 8, top: spec.events?.length ? 18 : 0 }}>
+          <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.3} />
+          <XAxis dataKey="x" fontSize={11} />
+          <YAxis fontSize={11} tickFormatter={compactNumber} width={55} />
+          <Tooltip formatter={(v, name) => [compactNumber(v), <FlagName key="n" value={name} />]} />
+          <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => <FlagName value={v} />} />
+          {spec.events?.map((e, idx) => (
+            <ReferenceLine
+              key={`event-${e.x}-${e.label}`}
+              x={e.x}
+              stroke="currentColor"
+              strokeOpacity={0.4}
+              strokeDasharray="2 3"
+              label={(props: LabelProps) => <EventBadge {...props} index={idx + 1} />}
             />
-          ) : null,
-        )}
-        {spec.series.map((s, i) =>
-          spec.kind === "area" ? (
-            <Area
-              key={s.name}
-              dataKey={s.name}
-              stroke={s.color ?? COLORS[i % COLORS.length]}
-              fill={s.color ?? COLORS[i % COLORS.length]}
-              fillOpacity={0.15}
-              strokeWidth={2}
-              strokeDasharray={s.dashed ? "5 4" : undefined}
-              connectNulls
-            />
-          ) : (
-            <Line
-              key={s.name}
-              dataKey={s.name}
-              stroke={s.color ?? COLORS[i % COLORS.length]}
-              dot={false}
-              strokeWidth={2}
-              strokeDasharray={s.dashed ? "5 4" : undefined}
-              connectNulls
-            />
-          ),
-        )}
-      </Chart>
-    </ChartFrame>
+          ))}
+          {spec.series.map((s, i) =>
+            s.band ? (
+              <Area
+                key={`${s.name}__band`}
+                dataKey={`${s.name}__band`}
+                stroke="none"
+                fill={s.color ?? COLORS[i % COLORS.length]}
+                fillOpacity={0.12}
+                legendType="none"
+                tooltipType="none"
+                connectNulls
+                isAnimationActive={false}
+              />
+            ) : null,
+          )}
+          {spec.series.map((s, i) =>
+            spec.kind === "area" ? (
+              <Area
+                key={s.name}
+                dataKey={s.name}
+                stroke={s.color ?? COLORS[i % COLORS.length]}
+                fill={s.color ?? COLORS[i % COLORS.length]}
+                fillOpacity={0.15}
+                strokeWidth={2}
+                strokeDasharray={s.dashed ? "5 4" : undefined}
+                connectNulls
+              />
+            ) : (
+              <Line
+                key={s.name}
+                dataKey={s.name}
+                stroke={s.color ?? COLORS[i % COLORS.length]}
+                dot={false}
+                strokeWidth={2}
+                strokeDasharray={s.dashed ? "5 4" : undefined}
+                connectNulls
+              />
+            ),
+          )}
+        </Chart>
+      </ChartFrame>
+      {spec.events?.length ? <EventLegend events={spec.events} /> : null}
+    </>
+  );
+}
+
+/** Small numbered dot drawn at the top of an event's reference line — fixed
+ * size regardless of title length, so it can never overflow the chart or
+ * collide with a neighboring event's marker the way a full text label did. */
+function EventBadge({ viewBox, index }: LabelProps & { index: number }) {
+  if (!viewBox || !("x" in viewBox) || !("y" in viewBox)) return null;
+  const x = viewBox.x;
+  const y = viewBox.y - 8;
+  return (
+    <g>
+      <circle cx={x} cy={y} r={7} fill="#475569" fillOpacity={0.9} />
+      <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize={9} fontWeight={600} fill="#fff">
+        {index}
+      </text>
+    </g>
+  );
+}
+
+/** Full event titles, keyed to the numbered badges on the chart above — the
+ * badges alone can't carry a readable title, so the legend is where the
+ * actual text lives. */
+function EventLegend({ events }: { events: NonNullable<ChartSpec["events"]> }) {
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-black/50 dark:text-white/50">
+      {events.map((e, i) => (
+        <span key={`${e.x}-${e.label}`} className="inline-flex items-center gap-1">
+          <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-[#475569] text-[9px] font-semibold text-white">
+            {i + 1}
+          </span>
+          {e.label}
+        </span>
+      ))}
+    </div>
   );
 }
 
