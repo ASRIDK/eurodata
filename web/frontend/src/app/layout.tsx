@@ -15,9 +15,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "European Data",
+  title: { default: "European Data", template: "%s — European Data" },
   description:
-    "Open-source European data: 26 indicators, 50 countries, curated events, and an AI analyst.",
+    "Open-source European data: 48 indicators across 9 domains, 50 countries, " +
+    "curated events, revision history, and an AI analyst.",
 };
 
 export default function RootLayout({

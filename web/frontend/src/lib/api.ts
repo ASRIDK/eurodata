@@ -81,6 +81,56 @@ export type SourceItem = {
   proxy_note?: string | null;
 };
 
+/** A single vintage in an indicator/country revision trail. */
+export type RevisionRow = {
+  period: string;
+  year: number;
+  source: string;
+  vintage_date: string;
+  value: number | null;
+  previous_value: number | null;
+  delta: number | null;
+  pct_change: number | null;
+  is_latest: boolean;
+};
+
+export type RevisionSummaryRow = {
+  period: string;
+  n_vintages: number;
+  first_value: number | null;
+  latest_value: number | null;
+  delta: number | null;
+};
+
+/** One revised (indicator, country, period) across the whole dataset. */
+export type RevisionDigestRow = {
+  indicator: string;
+  country: string;
+  domain: string;
+  source: string;
+  period: string;
+  year: number;
+  n_vintages: number;
+  first_value: number | null;
+  latest_value: number | null;
+  first_vintage: string;
+  latest_vintage: string;
+  delta: number | null;
+  pct_change: number | null;
+};
+
+/** Build a download URL for the CSV/Parquet export endpoint. */
+export function exportUrl(
+  view: "series" | "latest" | "compare" | "coverage" | "revisions-summary",
+  params: Record<string, string | number | undefined> = {},
+): string {
+  const qs = new URLSearchParams({ view });
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== "") qs.set(k, String(v));
+  }
+  return `${API_BASE}/api/export?${qs}`;
+}
+
 export type Block =
   | { type: "text"; text: string }
   | { type: "chart"; spec: ChartSpec }
