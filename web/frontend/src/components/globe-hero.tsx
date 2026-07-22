@@ -1,7 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { CountryPopup, KPI_INDICATORS, type KpiData } from "@/components/country-popup";
 import { EUROPEAN_MARKERS, type CountryMarker } from "@/components/european-markers";
@@ -47,6 +48,18 @@ export function GlobeHero() {
   // means concurrent first clicks reuse the same in-flight batch.
   const kpiCacheRef = useRef<Promise<KpiCache> | null>(null);
   const scrollAtOpenRef = useRef(0);
+
+  // Accessible fallback for the canvas globe: one entry per country (hub
+  // markers share an iso3), each a link to its data profile — a keyboard- and
+  // screen-reader-reachable path to the same destinations the markers offer.
+  const countryLinks = useMemo(() => {
+    const seen = new Set<string>();
+    return EUROPEAN_MARKERS.filter((m) => {
+      if (seen.has(m.iso3)) return false;
+      seen.add(m.iso3);
+      return true;
+    }).sort((a, b) => a.name.localeCompare(b.name));
+  }, []);
 
   const closePopup = useCallback(() => {
     setSelectedCountry(null);
@@ -158,6 +171,17 @@ export function GlobeHero() {
       >
         Scroll to explore ↓
       </div>
+
+      {/* Screen-reader / keyboard alternative to the canvas globe. */}
+      <nav aria-label="European countries" className="sr-only">
+        <ul>
+          {countryLinks.map((m) => (
+            <li key={m.iso3}>
+              <Link href={`/country/${m.iso3}`}>{m.name}</Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
     </div>
   );
 }

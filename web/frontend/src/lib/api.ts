@@ -62,6 +62,8 @@ export type Row = Record<string, string | number | boolean | null>;
 export type ChartSpec = {
   kind: "line" | "bar" | "area" | "scatter" | "pie";
   unit: string | null;
+  /** Label for the right-hand Y axis, when any series is pinned to `axis:"right"`. */
+  unitRight?: string | null;
   title?: string | null;
   series: {
     name: string;
@@ -69,6 +71,9 @@ export type ChartSpec = {
     dashed?: boolean;
     color?: string;
     band?: { x: number | string; lo: number; hi: number }[];
+    /** Which Y axis this series is measured against (default "left"). Set
+     *  "right" on a series with a different unit to give it its own scale. */
+    axis?: "left" | "right";
   }[];
   /** Curated events to draw as vertical markers on a time-series chart. */
   events?: { x: number | string; label: string; url?: string | null }[];
