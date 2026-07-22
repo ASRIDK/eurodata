@@ -281,8 +281,10 @@ PYTHONPATH=src .venv/bin/python -m pytest
 4. **Health/Social Media domains** — data exists but no event coverage for these domains
 5. **Playwright tests** — need CI integration (the frontend is not yet covered by CI)
 6. **Chat streaming** — currently waits for full response; SSE would improve UX
-7. **Frontend polish deferred** — dual-axis for mixed-unit comparisons, a keyboard/text
-   alternative for the globe canvas, non-color series encoding, and Explore URL-state sync
-   remain as follow-ups
-8. **Run the dedup migration** — `scripts/migrate_dedup.py` against the built database
+7. **Run the dedup migration** — `scripts/migrate_dedup.py` against the built database
    (removes the historical `statistic_record` duplicates; value-preserving)
+
+*(Now shipped, was previously deferred: Explore URL-state sync, a keyboard/screen-reader
+alternative for the globe canvas, non-color series encoding, and dual-axis support for
+mixed-unit comparisons — final visual tuning of the dash palette / dual axis is a suggested
+polish pass.)*
