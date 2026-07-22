@@ -128,8 +128,10 @@ export function GlobeHero() {
     >
       {/* vmax (not vmin): a square sized off the larger viewport dimension
           always overflows both edges, so the globe is edge-to-edge full-bleed
-          at any aspect ratio instead of leaving gutters on wide screens. */}
-      <div className="relative w-[135vmax] max-w-none shrink-0">
+          at any aspect ratio instead of leaving gutters on wide screens.
+          130 fills the frame with Europe now that theta centres the continent
+          instead of the Sahara; the limb stays off-screen at any ratio. */}
+      <div className="relative w-[130vmax] max-w-none shrink-0">
         <Globe
           className="max-w-none"
           markers={EUROPEAN_MARKERS}
