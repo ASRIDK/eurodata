@@ -158,3 +158,28 @@ def test_empty_edges_yield_no_activations():
 
 def test_unknown_source_yields_no_activations():
     assert propagate(CHAIN, "Z") == []
+
+
+def test_results_that_are_variants_of_each_other_are_collapsed():
+    # Reaching both "GDP" and "GDP per capita" reports one finding as two. The
+    # source-relative filter does not catch this: neither is a variant of the
+    # shocked node.
+    edges = [
+        ("Unemployment Rate", "GDP", 0.9, "undetermined"),
+        ("Unemployment Rate", "GDP per capita", 0.8, "undetermined"),
+        ("Unemployment Rate", "Renewable Energy Share %", 0.7, "undetermined"),
+    ]
+    out = propagate(edges, "Unemployment Rate", decay=1.0, threshold=0.0,
+                    edge_floor=0.0)
+    nodes = [a.node for a in out]
+    assert nodes == ["GDP", "Renewable Energy Share %"]   # strongest of the pair kept
+
+
+def test_variant_collapsing_can_be_switched_off():
+    edges = [
+        ("Unemployment Rate", "GDP", 0.9, "undetermined"),
+        ("Unemployment Rate", "GDP per capita", 0.8, "undetermined"),
+    ]
+    out = propagate(edges, "Unemployment Rate", decay=1.0, threshold=0.0,
+                    edge_floor=0.0, collapse_variants=False)
+    assert {a.node for a in out} == {"GDP", "GDP per capita"}
