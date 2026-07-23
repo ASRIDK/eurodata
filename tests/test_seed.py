@@ -18,12 +18,19 @@ def test_blocs_and_memberships():
     assert {"EU", "EUROZONE", "SCHENGEN", "EFTA", "EEA", "NATO"} <= {b["code"] for b in BLOCS}
     pairs = {(m[0], m[1]) for m in MEMBERSHIPS}
     assert ("DEU", "EU") in pairs
-    # Regression: Eurozone/Schengen were nearly empty in v1 seed data.
+    # No (country, bloc) pair should be listed twice.
+    assert len(pairs) == len(MEMBERSHIPS)
+    # "Current" membership is until_year IS NULL.
     current = [(m[0], m[1]) for m in MEMBERSHIPS if m[3] is None]
-    assert len([p for p in current if p[1] == "EUROZONE"]) >= 20
-    assert len([p for p in current if p[1] == "SCHENGEN"]) >= 25
     assert len([p for p in current if p[1] == "EU"]) == 27
+    # Eurozone: 20 through 2025 + Bulgaria from 2026 = 21 current members.
+    assert len([p for p in current if p[1] == "EUROZONE"]) == 21
+    assert ("BGR", "EUROZONE", 2026, None) in set(MEMBERSHIPS)
+    assert ("HRV", "EUROZONE", 2023, None) in set(MEMBERSHIPS)
+    assert len([p for p in current if p[1] == "SCHENGEN"]) >= 25
+    # Brexit: GBR left the EU in 2020, so it is a historical (not current) member.
     assert ("GBR", "EU", 1973, 2020) in set(MEMBERSHIPS)
+    assert ("GBR", "EU") not in set(current)
 
 
 def test_borders_symmetry_sample():

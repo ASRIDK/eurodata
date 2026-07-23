@@ -47,7 +47,10 @@ def load_records(con: duckdb.DuckDBPyConnection, source_name: str,
             " unit, currency, price_basis, vintage_date) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING "
             "RETURNING id",
-            [gid, iid, source_id, r.year, r.quarter, r.month, r.value,
+            # quarter/month are NOT NULL DEFAULT 0 (the "not applicable"
+            # sentinel that makes the UNIQUE key fire); Record carries None for
+            # absent sub-annual fields, so normalize at the DB boundary.
+            [gid, iid, source_id, r.year, r.quarter or 0, r.month or 0, r.value,
              r.unit, r.currency, r.price_basis, vintage],
         ).fetchall()
         count += len(inserted)
