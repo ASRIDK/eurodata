@@ -367,3 +367,104 @@ def test_module_level_forecast_delegate():
     df = ed_pkg.forecast("GDP per capita", "FRA", horizon=2)
     assert callable(ed_pkg.forecast)
     assert (df["kind"] == "forecast").sum() == 2
+
+
+# --- catalog surfaces ------------------------------------------------------
+
+def test_domains_and_sources_catalogs(db):
+    domains = db.domains()
+    assert {"Economy", "Demographics"} <= set(domains["name"])
+    assert domains["description"].notna().all()
+
+    sources = db.sources()
+    # sources() promises reliability order, which is what statistic_best relies
+    # on to pick a winner — assert the ordering, not just the membership.
+    assert list(sources["reliability_score"]) == sorted(
+        sources["reliability_score"], reverse=True)
+    assert sources.iloc[0]["reliability_score"] == 0.95
+    assert set(sources["name"]) >= {"Eurostat", "World Bank", "OECD", "ECB"}
+
+
+def test_years_spans_every_frequency(db):
+    # 2010 is the earliest annual GDP row; 2023 the latest unemployment row.
+    # years() reads statistic_record, so sub-annual rows count too.
+    assert db.years() == (2010, 2023)
+    assert all(isinstance(y, int) for y in db.years())
+
+
+def test_event_types_are_grouped_and_ordered(db):
+    types = db.event_types()
+    assert types["events"].sum() == 43          # every seeded event is counted
+    assert len(types) == 12                     # one row per distinct type
+    assert list(types["events"]) == sorted(types["events"], reverse=True)
+
+
+def test_ingestion_summary_attributes_errors_to_their_run(db):
+    # The fixture's load_records() already recorded one completed run.
+    summary = db.ingestion_summary()
+    assert list(summary["source"]) == ["World Bank"]
+    assert summary.iloc[0]["records_processed"] > 0
+    assert summary.iloc[0]["series_errors"] == 0
+
+    # An error inside the run's window is attributed to it; one outside is not.
+    run = db.query("SELECT source, started_at, ended_at FROM ingestion_run").iloc[0]
+    mid = run["started_at"] + (run["ended_at"] - run["started_at"]) / 2
+    db.con.execute(
+        "INSERT INTO ingestion_error (source, series, error, occurred_at) "
+        "VALUES (?, ?, ?, ?)", ["World Bank", "NY.GDP.MKTP.CD", "boom", mid])
+    db.con.execute(
+        "INSERT INTO ingestion_error (source, series, error, occurred_at) "
+        "VALUES (?, ?, ?, ?)",
+        ["World Bank", "SP.POP.TOTL", "later", run["ended_at"] + dt.timedelta(days=1)])
+    assert db.ingestion_summary().iloc[0]["series_errors"] == 1
+
+
+# --- indicator_trends ------------------------------------------------------
+
+def test_indicator_trends_rebases_both_series_to_100(db):
+    # GDP (DEU/FRA) and R&D (ITA) both span 2010-2020, so 2010 is the shared
+    # base year and each indicator must start at exactly 100 despite carrying
+    # completely different units.
+    out = db.indicator_trends(["GDP", "R&D Expenditure (% GDP)"])
+    assert set(out["indicator"]) == {"GDP", "R&D Expenditure (% GDP)"}
+    assert (out["base_year"] == 2010).all()
+    base = out[out["year"] == 2010]
+    assert len(base) == 2
+    assert base["value"].round(6).eq(100.0).all()
+    # GDP rises monotonically in the fixture, so its index must too.
+    gdp = out[out["indicator"] == "GDP"].sort_values("year")["value"]
+    assert gdp.is_monotonic_increasing
+
+
+def test_indicator_trends_without_rebase_keeps_raw_medians(db):
+    raw = db.indicator_trends(["GDP"], rebase=False)
+    first = raw[raw["year"] == 2010].iloc[0]
+    # cross-country median of DEU 100.0 and FRA 90.0
+    assert first["value"] == pytest.approx(95.0)
+    assert first["n_countries"] == 2
+
+
+def test_indicator_trends_empty_when_an_indicator_has_no_data(db):
+    # Median Age is seeded in the catalog but carries no rows in the fixture,
+    # so the whole result is empty rather than a half-populated chart.
+    out = db.indicator_trends(["GDP", "Median Age"])
+    assert out.empty
+    assert list(out.columns) == [
+        "indicator", "year", "value", "n_countries", "base_year"]
+
+
+def test_indicator_trends_respects_the_year_window(db):
+    out = db.indicator_trends(["GDP", "R&D Expenditure (% GDP)"], start=2015, end=2018)
+    assert out["year"].min() == 2015 and out["year"].max() == 2018
+    assert (out["base_year"] == 2015).all()
+
+
+# --- correlation_graph -----------------------------------------------------
+
+def test_correlation_graph_is_empty_until_the_graph_is_built(db):
+    # scripts/build_graph.py has not run against this fixture; the accessor must
+    # return an empty frame with its documented columns rather than raising.
+    edges = db.correlation_graph()
+    assert edges.empty
+    for col in ("indicator_a", "indicator_b", "weight"):
+        assert col in edges.columns
