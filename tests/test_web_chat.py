@@ -66,8 +66,11 @@ def test_run_chat_assembles_typed_blocks():
                       client=FakeClient(script))
     types_ = [b["type"] for b in blocks]
     assert types_[0] == "text"
-    assert "chart" in types_ and "table" in types_
+    assert "chart" in types_
     assert "sources" in types_ and "follow_ups" in types_
+    # The tool outcome still carries a table, but answers no longer dump it
+    # under every reply — the chart plus a few quoted figures is the answer.
+    assert "table" not in types_
     chart = next(b for b in blocks if b["type"] == "chart")
     assert chart["spec"]["kind"] == "line"
     sources = next(b for b in blocks if b["type"] == "sources")

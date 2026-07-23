@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { BlockChart } from "@/components/block-chart";
+import { BlockChart } from "@/components/block-chart-lazy";
 import { DataTable } from "@/components/data-table";
 import { api, type ChartSpec, type Row } from "@/lib/api";
 import { FlagName } from "@/components/flag";
