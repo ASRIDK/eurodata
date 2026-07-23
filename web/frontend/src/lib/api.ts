@@ -108,6 +108,15 @@ export type RevisionSummaryRow = {
 };
 
 /** One revised (indicator, country, period) across the whole dataset. */
+export type PropagationRow = {
+  node: string;
+  hop: number;
+  activation: number;
+  via: string;
+  path: string;
+  directed: boolean;
+};
+
 export type RevisionDigestRow = {
   indicator: string;
   country: string;
