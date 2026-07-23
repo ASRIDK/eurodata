@@ -129,9 +129,8 @@ def _assemble_blocks(final_text: str, outcomes: list[ToolOutcome],
     touched = {(ind, src) for o in outcomes for ind in o.indicators
                for src in (o.sources or [None])}
     if touched:
-        with deps.lock:
-            meta = {r["name"]: r for r in df_records(ed.indicators())}
-            source_urls = {r["name"]: r["url"] for r in df_records(ed.sources())}
+        meta = {r["name"]: r for r in df_records(ed.indicators())}
+        source_urls = {r["name"]: r["url"] for r in df_records(ed.sources())}
         items = []
         for ind, src in sorted(touched, key=lambda t: (t[0], str(t[1]))):
             m = meta.get(ind, {})
@@ -213,8 +212,7 @@ def run_chat(messages: list[dict[str, str]], *, client: Any | None = None,
         response_parts = []
         for fc in calls:
             tools_used.append(fc.name)
-            with deps.lock:
-                outcome = execute_tool(ed, fc.name, dict(fc.args or {}))
+            outcome = execute_tool(ed, fc.name, dict(fc.args or {}))
             outcomes.append(outcome)
             response_parts.append(types.Part.from_function_response(
                 name=fc.name, response={"result": outcome.payload}))

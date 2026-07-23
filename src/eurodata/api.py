@@ -401,6 +401,106 @@ class EuroData:
         df["is_best"] = ~df.duplicated("period", keep="first")
         return df
 
+    # -- revisions --------------------------------------------------------
+    # A "revision" is the same source re-reporting a different value for the
+    # same (indicator, country, period) at a later vintage_date. This is read
+    # straight from statistic_record (the statistic_best/_current views collapse
+    # vintages, so revisions are invisible through them).
+    _REVISION_PERIOD = (
+        "CASE WHEN s.month > 0 THEN printf('%d-%02d', s.year, s.month) "
+        "     WHEN s.quarter > 0 THEN printf('%d-Q%d', s.year, s.quarter) "
+        "     ELSE CAST(s.year AS VARCHAR) END")
+
+    def revisions(self, indicator: str, country: str) -> pd.DataFrame:
+        """Full vintage-by-vintage trail for one indicator/country: every
+        (period, source, vintage_date) whose value was revised at least once.
+
+        Columns: period, year, quarter, month, source, vintage_date, value,
+        previous_value, delta (vs the prior vintage of the same period/source),
+        pct_change, is_latest. Sorted by period then vintage_date.
+
+        A per-period summary (n_vintages, first/latest value, total delta) is
+        attached at ``df.attrs['summary']`` and ``df.attrs['n_revised']``.
+        """
+        ind_id = self._resolve_indicator(indicator)
+        geo_id = self._resolve_country(country)
+        trail = self.query(
+            f"SELECT {self._REVISION_PERIOD} AS period, s.year, s.quarter, s.month, "
+            "       src.name AS source, s.vintage_date, s.value "
+            "FROM statistic_record s "
+            "JOIN source src ON src.id = s.source_id "
+            "WHERE s.indicator_id = ? AND s.geography_id = ? "
+            "      AND s.vintage_date IS NOT NULL "
+            "ORDER BY s.year, s.quarter, s.month, src.name, s.vintage_date",
+            [ind_id, geo_id])
+        empty_cols = ["period", "year", "quarter", "month", "source", "vintage_date",
+                      "value", "previous_value", "delta", "pct_change", "is_latest"]
+        if trail.empty:
+            out = pd.DataFrame(columns=empty_cols)
+            out.attrs["summary"] = pd.DataFrame(
+                columns=["period", "n_vintages", "first_value", "latest_value", "delta"])
+            out.attrs["n_revised"] = 0
+            return out
+        g = trail.groupby(["period", "source"], sort=False)
+        trail["previous_value"] = g["value"].shift(1)
+        trail["delta"] = trail["value"] - trail["previous_value"]
+        trail["pct_change"] = trail["delta"] / trail["previous_value"].replace(0, pd.NA) * 100.0
+        trail["is_latest"] = trail.index == g["value"].transform(lambda s: s.index[-1])
+        # keep only series (period, source) that were actually revised at least once
+        revised = g["value"].transform(lambda s: s.nunique(dropna=True) > 1)
+        out = trail[revised].reset_index(drop=True)
+
+        summary = (out.groupby("period", sort=False)
+                      .agg(n_vintages=("vintage_date", "nunique"),
+                           first_value=("value", "first"),
+                           latest_value=("value", "last"))
+                      .reset_index())
+        summary["delta"] = summary["latest_value"] - summary["first_value"]
+        out.attrs["summary"] = summary
+        out.attrs["n_revised"] = int(summary["period"].nunique())
+        return out
+
+    def revisions_summary(self, country: str | None = None,
+                          indicator: str | None = None) -> pd.DataFrame:
+        """One row per revised (indicator, country, period, source) across the
+        whole dataset: n_vintages, first/latest value and vintage, delta and
+        pct_change. Feeds the /revisions browse view (most-revised indicators,
+        largest revisions, revision timeline). Filterable by country/indicator.
+
+        Sorted by absolute pct_change (largest revisions first)."""
+        where, params = ["s.vintage_date IS NOT NULL"], []
+        if indicator is not None:
+            where.append("s.indicator_id = ?"); params.append(self._resolve_indicator(indicator))
+        if country is not None:
+            where.append("s.geography_id = ?"); params.append(self._resolve_country(country))
+        df = self.query(
+            f"SELECT i.name AS indicator, COALESCE(g.iso3, g.code) AS country, "
+            f"       d.name AS domain, src.name AS source, "
+            f"       {self._REVISION_PERIOD} AS period, s.year, "
+            "        COUNT(DISTINCT s.vintage_date) AS n_vintages, "
+            "        arg_min(s.value, s.vintage_date) AS first_value, "
+            "        arg_max(s.value, s.vintage_date) AS latest_value, "
+            "        min(s.vintage_date) AS first_vintage, "
+            "        max(s.vintage_date) AS latest_vintage "
+            "FROM statistic_record s "
+            "JOIN geography g ON g.id = s.geography_id "
+            "JOIN indicator i ON i.id = s.indicator_id "
+            "JOIN domain d ON d.id = i.domain_id "
+            "JOIN source src ON src.id = s.source_id "
+            f"WHERE {' AND '.join(where)} "
+            "GROUP BY i.name, country, d.name, src.name, period, s.year "
+            "HAVING COUNT(DISTINCT s.vintage_date) > 1 "
+            "   AND arg_min(s.value, s.vintage_date) IS DISTINCT FROM "
+            "       arg_max(s.value, s.vintage_date)",
+            params)
+        if df.empty:
+            return df.assign(delta=pd.Series(dtype=float), pct_change=pd.Series(dtype=float))
+        df["delta"] = df["latest_value"] - df["first_value"]
+        df["pct_change"] = df["delta"] / df["first_value"].replace(0, pd.NA) * 100.0
+        return (df.reindex(df["pct_change"].abs().sort_values(ascending=False,
+                                                              na_position="last").index)
+                  .reset_index(drop=True))
+
     def compare(self, countries: list[str], indicator: str, *,
                 start: int | None = None, end: int | None = None) -> pd.DataFrame:
         """Wide period x country table for one indicator (index: year for
@@ -675,17 +775,37 @@ class EuroData:
     _CORR_COLUMNS = ["iso3", "n_years", "correlation", "p_value",
                      "ci_low", "ci_high", "lag"]
 
+    @staticmethod
+    def _growth_frame(frame: pd.DataFrame, col: str) -> pd.DataFrame:
+        """Per-country YoY % growth of `col` (levels -> growth rates), the same
+        transform `graph.correlate` uses. Guards against the classic spurious
+        correlation between two series that merely trend over time."""
+        frame = frame.sort_values(["iso3", "year"]).copy()
+        frame[col] = frame.groupby("iso3")[col].pct_change() * 100.0
+        return (frame.replace([float("inf"), float("-inf")], pd.NA)
+                     .dropna(subset=[col]))
+
     def lagged_correlation(self, indicator_a: str, indicator_b: str, *,
-                           lag: int = 0, min_years: int = 10) -> pd.DataFrame:
+                           lag: int = 0, min_years: int = 10,
+                           on: str = "growth") -> pd.DataFrame:
         """Per-country Pearson correlation of a(t) with b(t + lag).
 
-        lag > 0 tests whether indicator_a leads indicator_b by `lag` years.
-        Countries with fewer than min_years overlapping years are dropped.
-        p_value and the 95% CI [ci_low, ci_high] come from the Fisher
-        z-transform (normal approximation, unadjusted for multiple tests).
+        ``on='growth'`` (default) correlates year-over-year growth rates; two
+        series that both merely trend upward do NOT correlate spuriously this
+        way. ``on='levels'`` correlates raw levels (kept for continuity, but any
+        two trending series will read ~0.99 — use with care). lag > 0 tests
+        whether indicator_a leads indicator_b by `lag` years. Countries with
+        fewer than min_years overlapping points are dropped. p_value and the 95%
+        CI [ci_low, ci_high] come from the Fisher z-transform (normal
+        approximation, unadjusted for multiple tests).
         """
+        if on not in ("growth", "levels"):
+            raise ValueError("on must be 'growth' or 'levels'")
         a = self._indicator_frame(indicator_a).rename(columns={"value": "a"})
         b = self._indicator_frame(indicator_b).rename(columns={"value": "b"})
+        if on == "growth":
+            a = self._growth_frame(a, "a")
+            b = self._growth_frame(b, "b")
         b = b.assign(year=b["year"] - lag)  # b(t+lag) aligned onto year t
         merged = a.merge(b, on=["iso3", "year"])
         rows = []
@@ -696,15 +816,70 @@ class EuroData:
             p, lo, hi = _pearson_stats(r, len(grp))
             rows.append({"iso3": iso3, "n_years": len(grp), "correlation": r,
                          "p_value": p, "ci_low": lo, "ci_high": hi, "lag": lag})
-        return (pd.DataFrame(rows).sort_values("correlation", ascending=False)
-                  .reset_index(drop=True) if rows
-                else pd.DataFrame(columns=self._CORR_COLUMNS))
+        out = (pd.DataFrame(rows).sort_values("correlation", ascending=False)
+                 .reset_index(drop=True) if rows
+               else pd.DataFrame(columns=self._CORR_COLUMNS))
+        out.attrs["basis"] = on
+        return out
 
     def correlate(self, indicator_a: str, indicator_b: str, *,
-                  min_years: int = 10) -> pd.DataFrame:
-        """Per-country Pearson correlation between two indicators (lag 0)."""
+                  min_years: int = 10, on: str = "growth") -> pd.DataFrame:
+        """Per-country Pearson correlation between two indicators (lag 0).
+
+        Defaults to year-over-year growth rates (``on='growth'``); pass
+        ``on='levels'`` for raw levels. See ``lagged_correlation``.
+        """
         return self.lagged_correlation(indicator_a, indicator_b, lag=0,
-                                       min_years=min_years)
+                                       min_years=min_years, on=on)
+
+    def country_correlations(self, country: str, *, min_years: int = 8,
+                             limit: int | None = 20) -> pd.DataFrame:
+        """This country's own growth-rate correlations for the indicator pairs
+        the structural graph flagged as significant across Europe.
+
+        Rather than presenting Europe-wide pooled edges as if they were local,
+        this walks the FDR-surviving pairs from ``correlation_graph()`` and
+        computes *this country's* Pearson r (on YoY growth) for each. Columns:
+        indicator_a, indicator_b, domain_a, domain_b, correlation, n_years,
+        p_value, relationship (the pair's strongest lag test in the pooled
+        graph), q_value (the pair's Europe-wide FDR q). Sorted by |correlation|.
+        """
+        geo_id = self._resolve_country(country)  # validate / raise for unknown
+        iso3 = self._con.execute(
+            "SELECT COALESCE(iso3, code) FROM geography WHERE id = ?", [geo_id]).fetchone()[0]
+        edges = self.correlation_graph()
+        cols = ["indicator_a", "indicator_b", "domain_a", "domain_b",
+                "correlation", "n_years", "p_value", "relationship", "q_value"]
+        if edges.empty:
+            return pd.DataFrame(columns=cols)
+        # Growth frame per indicator (built once), restricted to this country.
+        names = pd.unique(edges[["indicator_a", "indicator_b"]].values.ravel())
+        gframes: dict[str, pd.DataFrame] = {}
+        for name in names:
+            f = self._indicator_frame(name).rename(columns={"value": "v"})
+            f = self._growth_frame(f, "v")
+            gframes[name] = f[f["iso3"] == iso3][["year", "v"]]
+        rows = []
+        for _, e in edges.iterrows():
+            fa, fb = gframes[e["indicator_a"]], gframes[e["indicator_b"]]
+            m = fa.merge(fb, on="year", suffixes=("_a", "_b"))
+            if len(m) < min_years or m["v_a"].std() == 0 or m["v_b"].std() == 0:
+                continue
+            r = m["v_a"].corr(m["v_b"])
+            if pd.isna(r):
+                continue
+            p, _, _ = _pearson_stats(r, len(m))
+            rows.append({"indicator_a": e["indicator_a"], "indicator_b": e["indicator_b"],
+                         "domain_a": e["domain_a"], "domain_b": e["domain_b"],
+                         "correlation": r, "n_years": len(m), "p_value": p,
+                         "relationship": e["relationship"], "q_value": e["q_value"]})
+        if not rows:
+            return pd.DataFrame(columns=cols)
+        out = (pd.DataFrame(rows)
+                 .reindex(pd.DataFrame(rows)["correlation"].abs()
+                          .sort_values(ascending=False).index)
+                 .reset_index(drop=True))
+        return out.head(limit) if limit else out
 
 
 # --- module-level default handle -----------------------------------------
@@ -748,8 +923,11 @@ search_indicators = _delegate("search_indicators")
 series = _delegate("series")
 latest = _delegate("latest")
 provenance = _delegate("provenance")
+revisions = _delegate("revisions")
+revisions_summary = _delegate("revisions_summary")
 country_blocs = _delegate("country_blocs")
 country_indicators = _delegate("country_indicators")
+country_correlations = _delegate("country_correlations")
 compare = _delegate("compare")
 forecast = _delegate("forecast")
 coverage = _delegate("coverage")
@@ -767,7 +945,9 @@ __all__ = [
     "EuroData", "EuroDataLookupError", "open",
     "countries", "blocs", "bloc_members", "domains", "indicators", "sources",
     "years", "search_indicators", "series", "latest", "provenance",
-    "country_blocs", "country_indicators", "compare", "forecast", "coverage",
+    "revisions", "revisions_summary",
+    "country_blocs", "country_indicators", "country_correlations",
+    "compare", "forecast", "coverage",
     "ingestion_summary", "events", "event_types", "event_study",
     "correlate", "lagged_correlation", "indicator_trends", "correlation_graph",
     "query", "relation",
