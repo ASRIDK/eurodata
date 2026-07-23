@@ -158,6 +158,21 @@ def latest(indicator: str, bloc: str | None = None) -> dict:
     return {"rows": df_records(_query("latest", indicator=indicator, bloc=bloc))}
 
 
+@app.get("/api/provenance")
+def provenance(indicator: str, country: str) -> dict:
+    return {"rows": df_records(_query("provenance", indicator=indicator, country=country))}
+
+
+@app.get("/api/country-blocs")
+def country_blocs(country: str) -> dict:
+    return {"rows": df_records(_query("country_blocs", country=country))}
+
+
+@app.get("/api/country-indicators")
+def country_indicators(country: str) -> dict:
+    return {"rows": df_records(_query("country_indicators", country=country))}
+
+
 @app.get("/api/events")
 def events(country: str | None = None, event_type: str | None = None,
            bloc: str | None = None, since: str | None = None,

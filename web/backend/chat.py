@@ -3,7 +3,11 @@
 ``run_chat`` takes the conversation as [{"role", "content"}] text messages,
 lets the model call the read-only tools in tools.py, then assembles the
 response the frontend renders: a list of typed blocks —
-text / chart / table / sources / warning / follow_ups.
+text / chart / sources / warning / follow_ups.
+
+Tool outcomes still carry a `table`, but the assembler no longer emits a
+table block: a raw data dump under every answer was noise. The frontend
+keeps its table renderer for the Explore/Events pages, which ask for one.
 """
 from __future__ import annotations
 
@@ -41,9 +45,9 @@ suggested name.
 indicator is a proxy for the official concept.
 - Correlation is not causation; say so whenever you discuss correlations or \
 event studies.
-- Be concise: a short paragraph of insight. The UI renders charts and tables \
-from your tool calls automatically, so do not write out long lists of numbers \
-or ASCII tables.
+- Be concise: a short paragraph of insight. The UI renders charts from your \
+tool calls automatically, so do not write out long lists of numbers, markdown \
+tables or ASCII tables. Quote only the few figures your point rests on.
 - If the user asks for a specific kind of chart, diagram or graph (pie, \
 scatter, area, bar, line...), first fetch the data with the other tools, then \
 call render_chart with points taken from those results. Never draw charts in \
@@ -120,9 +124,6 @@ def _assemble_blocks(final_text: str, outcomes: list[ToolOutcome],
     chart_outcome = next((o for o in reversed(outcomes) if o.chart), None)
     if chart_outcome:
         blocks.append({"type": "chart", "spec": chart_outcome.chart})
-    table_outcome = next((o for o in reversed(outcomes) if o.table), None)
-    if table_outcome and table_outcome.table["rows"]:
-        blocks.append({"type": "table", **table_outcome.table})
 
     # provenance chips: one per (indicator, source) touched
     touched = {(ind, src) for o in outcomes for ind in o.indicators
