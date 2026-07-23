@@ -1,5 +1,35 @@
 # eurodata — Session Handoff
 
+> **Update (2026-07-23, CI + source monitoring + api coverage).** PRs #1-#5 are
+> merged to `main`; the dedup migration has been run against the production
+> database (436,997 → 289,747 rows, `statistic_best` byte-identical). Added
+> since:
+>
+> - **CI covers the frontend.** `.github/workflows/ci.yml` gained a `frontend`
+>   job running `npx eslint src` then `npm run build`. Previously CI ran pytest
+>   only, so a lint or build regression could land on `main` unnoticed.
+> - **Scheduled source monitoring.** `scripts/check_sources.py` probes every
+>   registered fetcher against the live APIs and reports records, per-series
+>   errors, and fatal failures; exit 1 if an enabled source returns nothing.
+>   `.github/workflows/source-health.yml` runs it Mondays 06:00 UTC and opens (or
+>   comments on) an issue labelled `source-health`, closing it when the sources
+>   recover. This exists because the original failure mode was *silent*: a
+>   broken Eurostat fetcher looked identical to one with no data. Note this is a
+>   health probe, not an ingestion — nothing is written to DuckDB, since the
+>   database is gitignored and CI has nowhere to persist it. **Ingestion itself
+>   is still a manual local step** (`scripts/run_ingestion.py`).
+>   Baseline run: ECB 588, Eurostat 884, OECD 491, World Bank 1,666 records; the
+>   World Bank probe takes ~6 min because it paces its ~34 series.
+> - **`api.py` coverage.** 32 of 34 public methods are now exercised (the other
+>   two are a property and an internal helper). Added tests for `domains`,
+>   `sources`, `years`, `event_types`, `ingestion_summary` (including that an
+>   error outside a run's window is *not* attributed to it), `correlation_graph`
+>   before the graph is built, and `indicator_trends` (rebasing to 100, raw
+>   medians, the year window, and the empty result when an indicator has no
+>   data). Suite: 130 passing. The `indicator_trends` and `ingestion_summary`
+>   tests were mutation-checked — both fail when the behaviour they describe is
+>   broken.
+
 > **Update (2026-07-22, frontend a11y follow-ups).** On branch
 > `feat/frontend-a11y-followups` (stacked on PR3). The three items PR3 deferred
 > now ship, build/lint/Playwright-verified: (1) **Explore URL-state sync** —
