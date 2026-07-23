@@ -539,3 +539,20 @@ def test_propagate_accepts_an_indicator_api_code(db):
     # une_rt_a is Unemployment Rate's api_code; _resolve_indicator accepts either
     out = db.propagate("une_rt_a", edge_floor=0.3)
     assert "Government Debt (% GDP)" in set(out["node"])
+
+
+def test_propagate_walks_this_countrys_own_correlations(db):
+    # The country branch reads country_correlations, which names its weight
+    # column `correlation` and carries no `direction` column at all -- every
+    # per-country edge is therefore symmetric, so nothing can come back
+    # directed. ITA has 9 overlapping years of these two series in the fixture,
+    # which clears country_correlations' 8-year minimum; with fewer, that call
+    # returns nothing and this test would pass while asserting nothing.
+    _seed_edges(db, [("R&D Expenditure (% GDP)", "GDP per capita", 0.9,
+                      "undetermined")])
+    out = db.propagate("R&D Expenditure (% GDP)", country="ITA", edge_floor=0.3)
+    assert list(out["node"]) == ["GDP per capita"]
+    assert out.iloc[0]["hop"] == 1
+    assert out.iloc[0]["activation"] > 0
+    assert bool(out.iloc[0]["directed"]) is False
+    assert list(out.columns) == ["node", "hop", "activation", "via", "path", "directed"]
