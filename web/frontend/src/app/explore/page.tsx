@@ -3,10 +3,11 @@
 import { X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-import { BlockChart } from "@/components/block-chart";
+import { BlockChart } from "@/components/block-chart-lazy";
 import { DataTable } from "@/components/data-table";
 import { api, type ChartSpec, type Row } from "@/lib/api";
 import { Flag, FlagName } from "@/components/flag";
+import { disagreements, SourceComparison } from "@/components/source-comparison";
 
 const DEFAULT_COUNTRIES = ["FRA", "DEU", "ITA"];
 // Starter comparison for sub-national indicators: Île-de-France, Oberbayern,
@@ -24,6 +25,9 @@ export default function Explore() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [events, setEvents] = useState<Row[]>([]);
+  const [showEvents, setShowEvents] = useState(true);
+  const [provenance, setProvenance] = useState<Record<string, Row[]>>({});
   const [showForecast, setShowForecast] = useState(false);
   const [horizon, setHorizon] = useState(5);
   const [forecasts, setForecasts] = useState<
@@ -117,6 +121,54 @@ export default function Explore() {
     };
   }, [showForecast, indicator, selected, horizon]);
 
+  useEffect(() => {
+    // Event markers only make sense for country-level time series, not
+    // NUTS 2 regions (no per-region event data) or the rank/change charts.
+    if (isRegional || !selected.length) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale markers when the selection stops qualifying
+      setEvents([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(
+      selected.map((iso) =>
+        api<{ rows: Row[] }>(`/api/events?country=${iso}`).catch(() => ({ rows: [] })),
+      ),
+    ).then((results) => {
+      if (cancelled) return;
+      const byCode = new Map<string, Row>();
+      for (const r of results.flatMap((r) => r.rows)) byCode.set(String(r.code), r);
+      setEvents([...byCode.values()]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isRegional, selected]);
+
+  useEffect(() => {
+    if (isRegional || !indicator || !selected.length) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale provenance when the selection stops qualifying
+      setProvenance({});
+      return;
+    }
+    let cancelled = false;
+    Promise.all(
+      selected.map((iso) =>
+        api<{ rows: Row[] }>(
+          `/api/provenance?indicator=${encodeURIComponent(indicator)}&country=${iso}`,
+        )
+          .then((r) => [iso, r.rows] as const)
+          .catch(() => [iso, []] as const),
+      ),
+    ).then((entries) => {
+      if (cancelled) return;
+      setProvenance(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isRegional, indicator, selected]);
+
   const meta = indicators.find((i) => i.name === indicator);
   const unit = rows.length ? String(rows[0].unit ?? "") : "";
   const sources = [...new Set(rows.map((r) => String(r.source)))];
@@ -172,6 +224,25 @@ export default function Explore() {
           }),
         }
       : spec;
+
+  const years = rows.map((r) => Number(r.year)).filter((y) => !Number.isNaN(y));
+  const eventMarkers =
+    showEvents && years.length
+      ? events
+          .map((e) => ({
+            x: Number(String(e.start_date).slice(0, 4)),
+            label: String(e.title),
+          }))
+          .filter((e) => e.x >= Math.min(...years) && e.x <= Math.max(...years))
+          // cap to keep the chart legible; a full list is one click away on /events
+          .slice(0, 6)
+      : [];
+  const chartSpec: ChartSpec | null =
+    (specWithForecast ?? spec) && eventMarkers.length
+      ? { ...(specWithForecast ?? spec)!, events: eventMarkers }
+      : (specWithForecast ?? spec);
+
+  const sourceDisagreements = disagreements(provenance);
 
   const latestByCountry = selected.map((iso) => {
     const c = rows.filter((r) => r.iso3 === iso);
@@ -304,6 +375,16 @@ export default function Explore() {
           />
           Forecast →
         </label>
+        {!isRegional ? (
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showEvents}
+              onChange={(e) => setShowEvents(e.target.checked)}
+            />
+            Events
+          </label>
+        ) : null}
         {showForecast ? (
           <select
             value={horizon}
@@ -329,7 +410,7 @@ export default function Explore() {
         <p className="mt-6 text-sm text-black/50 dark:text-white/50">Loading…</p>
       ) : spec ? (
         <div className="mt-6 space-y-4">
-          <BlockChart spec={specWithForecast ?? spec} />
+          <BlockChart spec={chartSpec ?? spec} />
           <div className="text-xs text-black/50 dark:text-white/50">
             Source: {sources.join(", ")}
             {meta?.is_proxy ? (
@@ -339,6 +420,7 @@ export default function Explore() {
             ) : null}
             {meta?.definition ? <div className="mt-1">{String(meta.definition)}</div> : null}
           </div>
+          <SourceComparison rows={sourceDisagreements} />
           {showForecast && Object.keys(forecasts).length ? (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-800 dark:text-amber-200">
               {Object.values(forecasts)[0].disclaimer}

@@ -18,7 +18,7 @@ export const KPI_INDICATORS = [
 export type Kpi = { value: number; unit: string | null; period: string };
 export type KpiData = Record<string, Kpi | null>;
 
-function formatKpi(k: Kpi): string {
+export function formatKpi(k: Kpi): string {
   const { value, unit } = k;
   if (unit === "%") return `${value.toFixed(1)}%`;
   if (unit === "USD") {
@@ -132,10 +132,10 @@ export function CountryPopup({
       </div>
 
       <Link
-        href={`/explore?country=${country.iso3}`}
+        href={`/country/${country.iso3}`}
         className="mt-3 block text-xs font-medium underline underline-offset-4"
       >
-        View details →
+        View full profile →
       </Link>
     </>
   );
