@@ -1,5 +1,27 @@
 # eurodata — Session Handoff
 
+> **Update (2026-07-22, PR3 — frontend: revisions UI, mobile, per-country
+> correlations).** Stacked on PR2. Mobile navbar rebuilt as a responsive
+> hamburger (aria-expanded/controls, Esc + click-away); verified
+> `scrollWidth === clientWidth` at 390px on all 8 routes via Playwright. New
+> `/revisions` browse route (largest revisions + most-revised leaderboard) and
+> an inline `RevisionsChip` ("N values revised" → vintage trail) on the Explore
+> chart. Country page now uses `/api/country-correlations` (the country's own
+> growth-rate correlations) and drops the "Europe-wide" caveat. Added: CSV
+> export buttons (Explore/Ranking via `/api/export`), amber staleness badges
+> from `years_stale`, forecast typical-error (`backtest_mae`) surfaced on the
+> Explore forecast note, per-route `metadata` via `layout.tsx` files (fixing the
+> shared `<title>` and the stale "26 indicators/50 countries" → "48/50"), and an
+> `exportUrl` helper + revision types in `lib/api.ts`. The 4 pre-existing
+> `react-hooks/set-state-in-effect` lint errors are resolved (eslint **0
+> errors/0 warnings**, from 4); `npm run build` clean (TypeScript passes).
+> Lint locally with `./node_modules/.bin/eslint src` (a global eslint 10 shadows
+> the project's eslint 9 and errors — use the local binary).
+> **Deferred frontend follow-ups** (need live/visual verification): dual-axis
+> for mixed-unit comparisons, a keyboard/text alternative + non-color encoding
+> for the globe canvas, and Explore URL-state sync. PITCH.md rewritten to match
+> what now ships.
+
 > **Update (2026-07-22, PR2 — revisions API + backend hardening).** Stacked on
 > PR1. New public API: `revisions(indicator, country)` (full vintage-by-vintage
 > trail from `statistic_record`, with a per-period summary in `df.attrs`),

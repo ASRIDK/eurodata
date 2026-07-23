@@ -5,8 +5,9 @@ import { useCallback, useEffect, useState } from "react";
 
 import { BlockChart } from "@/components/block-chart-lazy";
 import { DataTable } from "@/components/data-table";
-import { api, type ChartSpec, type Row } from "@/lib/api";
+import { api, exportUrl, type ChartSpec, type Row } from "@/lib/api";
 import { Flag, FlagName } from "@/components/flag";
+import { RevisionsChip } from "@/components/revisions-chip";
 import { disagreements, SourceComparison } from "@/components/source-comparison";
 
 const DEFAULT_COUNTRIES = ["FRA", "DEU", "ITA"];
@@ -20,6 +21,8 @@ export default function Explore() {
   const [regions, setRegions] = useState<Row[]>([]);
   // indicators whose data is per NUTS 2 region rather than per country
   const [nutsIndicators, setNutsIndicators] = useState<Set<string>>(new Set());
+  // indicator name -> years since its most recent data point (from coverage)
+  const [staleByIndicator, setStaleByIndicator] = useState<Map<string, number>>(new Map());
   const [indicator, setIndicator] = useState("GDP per capita");
   const [selected, setSelected] = useState<string[]>(DEFAULT_COUNTRIES);
   const [rows, setRows] = useState<Row[]>([]);
@@ -31,7 +34,7 @@ export default function Explore() {
   const [showForecast, setShowForecast] = useState(false);
   const [horizon, setHorizon] = useState(5);
   const [forecasts, setForecasts] = useState<
-    Record<string, { forecast: { t: number; period: string; value: number; lo: number; hi: number }[]; disclaimer: string; method: string }>
+    Record<string, { forecast: { t: number; period: string; value: number; lo: number; hi: number }[]; disclaimer: string; method: string; backtest_mae: number | null; unit: string | null }>
   >({});
 
   useEffect(() => {
@@ -54,6 +57,13 @@ export default function Explore() {
             cov.rows
               .filter((r) => r.geo_level === "NUTS2")
               .map((r) => String(r.indicator)),
+          ),
+        );
+        setStaleByIndicator(
+          new Map(
+            cov.rows
+              .filter((r) => r.years_stale !== null && r.years_stale !== undefined)
+              .map((r) => [String(r.indicator), Number(r.years_stale)]),
           ),
         );
       })
@@ -104,7 +114,7 @@ export default function Explore() {
     let cancelled = false;
     Promise.all(
       selected.map((iso) =>
-        api<{ forecast: { t: number; period: string; value: number; lo: number; hi: number }[]; disclaimer: string; method: string }>(
+        api<{ forecast: { t: number; period: string; value: number; lo: number; hi: number }[]; disclaimer: string; method: string; backtest_mae: number | null; unit: string | null }>(
           `/api/forecast?indicator=${encodeURIComponent(indicator)}&country=${iso}&horizon=${horizon}`,
         )
           .then((r) => [iso, r] as const)
@@ -411,15 +421,36 @@ export default function Explore() {
       ) : spec ? (
         <div className="mt-6 space-y-4">
           <BlockChart spec={chartSpec ?? spec} />
-          <div className="text-xs text-black/50 dark:text-white/50">
-            Source: {sources.join(", ")}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-black/50 dark:text-white/50">
+            <span>Source: {sources.join(", ")}</span>
+            {staleByIndicator.get(indicator) !== undefined &&
+            staleByIndicator.get(indicator)! > 2 ? (
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-300">
+                {staleByIndicator.get(indicator)}y stale
+              </span>
+            ) : null}
             {meta?.is_proxy ? (
-              <span className="ml-2 rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-300">
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-300">
                 proxy — {String(meta.proxy_note ?? "stand-in for the official concept")}
               </span>
             ) : null}
-            {meta?.definition ? <div className="mt-1">{String(meta.definition)}</div> : null}
+            {!isRegional && selected.length ? (
+              <RevisionsChip indicator={indicator} country={selected[0]} />
+            ) : null}
+            <a
+              href={
+                selected.length > 1
+                  ? exportUrl("compare", { indicator, countries: selected.join(",") })
+                  : exportUrl("series", { indicator, country: selected[0] })
+              }
+              className="rounded-full bg-black/5 px-2 py-0.5 font-medium hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+            >
+              ↓ CSV
+            </a>
           </div>
+          {meta?.definition ? (
+            <div className="text-xs text-black/50 dark:text-white/50">{String(meta.definition)}</div>
+          ) : null}
           <SourceComparison rows={sourceDisagreements} />
           {showForecast && Object.keys(forecasts).length ? (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-800 dark:text-amber-200">
@@ -427,7 +458,14 @@ export default function Explore() {
               {" "}Methods:{" "}
               {selected
                 .filter((iso) => forecasts[iso])
-                .map((iso) => `${iso}: ${forecasts[iso].method}`)
+                .map((iso) => {
+                  const f = forecasts[iso];
+                  const mae =
+                    f.backtest_mae != null
+                      ? ` (typical error ±${f.backtest_mae.toLocaleString(undefined, { maximumFractionDigits: 2 })}${f.unit ? ` ${f.unit}` : ""})`
+                      : "";
+                  return `${iso}: ${f.method}${mae}`;
+                })
                 .join(", ")}
               .
             </div>
