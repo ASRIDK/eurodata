@@ -12,6 +12,9 @@ venv/
 # Data artifacts (large / regenerated)
 data/raw/
 data/*.duckdb
+# scripts/migrate_dedup.py leaves a .bak beside the database; it is another
+# full copy (~23MB) and must not follow the pattern above into a commit.
+data/*.duckdb.bak
 data/releases/
 
 # Editor / tooling noise
