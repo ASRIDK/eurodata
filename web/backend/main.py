@@ -252,6 +252,21 @@ def country_correlations(country: str, limit: int = 20) -> dict:
     return {"rows": df_records(df)}
 
 
+@app.get("/api/propagate")
+def propagate(node: str, country: str | None = None, shock: float = 1.0,
+              max_hops: int = 3, decay: float = 0.6, threshold: float = 0.05,
+              edge_floor: float = 0.30) -> dict:
+    """Ripple of a shock to `node` across the correlation graph.
+
+    Associative, not causal: `directed` is True only where every edge on the
+    path carries a Granger-confirmed direction.
+    """
+    df = _query("propagate", node=node, country=country, shock=shock,
+                max_hops=max_hops, decay=decay, threshold=threshold,
+                edge_floor=edge_floor)
+    return {"rows": df_records(df)}
+
+
 _EXPORT_VIEWS = {"series", "latest", "compare", "coverage", "revisions-summary"}
 
 
