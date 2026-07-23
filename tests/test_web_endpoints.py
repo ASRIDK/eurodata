@@ -109,3 +109,22 @@ def test_chat_rate_limit_429(client, monkeypatch):
     second = client.post("/api/chat", json=payload)  # limiter trips
     assert second.status_code == 429
     assert int(second.headers["retry-after"]) >= 1
+
+
+def test_propagate_endpoint_returns_rows(client):
+    r = client.get("/api/propagate", params={"node": "GDP"})
+    assert r.status_code == 200
+    assert "rows" in r.json()
+
+
+def test_propagate_endpoint_404s_on_an_unknown_node(client):
+    r = client.get("/api/propagate", params={"node": "Not An Indicator"})
+    assert r.status_code == 404
+
+
+def test_propagate_endpoint_passes_through_tuning_parameters(client):
+    r = client.get("/api/propagate", params={
+        "node": "GDP", "shock": 2.0, "max_hops": 1, "edge_floor": 0.9})
+    assert r.status_code == 200
+    for row in r.json()["rows"]:
+        assert row["hop"] == 1
