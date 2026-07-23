@@ -115,9 +115,17 @@ export default function Revisions() {
       ) : loading ? (
         <p className="mt-6 text-sm text-black/50 dark:text-white/50">Loading…</p>
       ) : rows.length === 0 ? (
-        <p className="mt-6 text-sm text-black/50 dark:text-white/50">
-          No revisions recorded for this selection.
-        </p>
+        // An empty result here is the normal state for a young dataset, not a
+        // failure: vintages are recorded on every ingestion, but a revision
+        // only appears once a source restates a figure it published before.
+        <div className="mt-6 text-sm text-black/50 dark:text-white/50">
+          <p>No revisions recorded for this selection.</p>
+          <p className="mt-2 max-w-prose text-xs">
+            Every ingestion is stored as a dated vintage, so a restated figure
+            will show up here once a source publishes one. Sources revise on
+            monthly and quarterly cycles, so this fills in as the dataset ages.
+          </p>
+        </div>
       ) : (
         <div className="mt-6 space-y-8">
           {mostRevised.length > 1 ? (
