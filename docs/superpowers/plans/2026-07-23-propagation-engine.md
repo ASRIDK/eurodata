@@ -440,22 +440,35 @@ Append to `tests/test_api.py`:
 
 def _seed_edges(db, rows):
     """Insert CORRELATES_WITH edges directly, so propagation can be tested
-    without running the full graph builder."""
+    without running the full graph builder.
+
+    graph_node.id is an INTEGER PRIMARY KEY with no sequence default, so ids
+    must be assigned explicitly — the same thing scripts/build_graph.py does
+    with its counter. correlation_graph() parses props as JSON and reads
+    relationship/direction/q_value/n_countries, so all four must be present.
+    """
+    def node_id(name):
+        ind_id = db.con.execute(
+            "SELECT id FROM indicator WHERE name = ?", [name]).fetchone()[0]
+        existing = db.con.execute(
+            "SELECT id FROM graph_node WHERE node_type='indicator' AND ref_id = ?",
+            [ind_id]).fetchone()
+        if existing:
+            return existing[0]
+        nid = db.con.execute(
+            "SELECT COALESCE(MAX(id), 0) + 1 FROM graph_node").fetchone()[0]
+        db.con.execute(
+            "INSERT INTO graph_node (id, node_type, ref_id, label) "
+            "VALUES (?, 'indicator', ?, ?)", [nid, ind_id, name])
+        return nid
+
     for a, b, weight, direction in rows:
-        for name in (a, b):
-            db.con.execute(
-                "INSERT INTO graph_node (node_type, ref_id, label) "
-                "SELECT 'indicator', id, name FROM indicator WHERE name = ? "
-                "AND NOT EXISTS (SELECT 1 FROM graph_node WHERE label = ?)",
-                [name, name])
+        props = ('{"direction": "%s", "q_value": 0.01, '
+                 '"relationship": "contemporaneous", "n_countries": 5}' % direction)
         db.con.execute(
             "INSERT INTO graph_edge (src_node_id, dst_node_id, edge_type, weight, props) "
-            "SELECT na.id, nb.id, 'CORRELATES_WITH', ?, ? "
-            "FROM graph_node na, graph_node nb "
-            "WHERE na.label = ? AND nb.label = ?",
-            [weight, f'{{"direction": "{direction}", "q_value": 0.01, '
-                     f'"relationship": "contemporaneous", "n_countries": 5}}',
-             a, b])
+            "VALUES (?, ?, 'CORRELATES_WITH', ?, ?)",
+            [node_id(a), node_id(b), weight, props])
 
 
 def test_propagate_ripples_across_indicators(db):
