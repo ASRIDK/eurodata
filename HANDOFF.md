@@ -1,5 +1,25 @@
 # eurodata — Session Handoff
 
+> **Update (2026-07-22, PR1 — data-integrity sentinel): the `statistic_record`
+> UNIQUE constraint now actually fires.** `quarter`/`month` were nullable, so
+> every key carried a NULL and (since `NULL != NULL`) the constraint — and the
+> `ON CONFLICT DO NOTHING` dedup in `ingest/pipeline.py` — matched nothing;
+> ~34% of rows were exact duplicates. They are now `NOT NULL DEFAULT 0` (0 =
+> "not applicable"; annual rows are (0,0)). Four read-side traps in `api.py`
+> that branched on month/quarter *nullity* were switched to `> 0`
+> (`_SERIES_SQL`, `provenance`, `forecast` frequency inference, `event_study`
+> `t_mid` — the last two silently mis-treated every annual series once NULL
+> became 0). `coverage()` gained an additive `years_stale` column.
+>
+> **OPEN ITEM — run locally against the built DB** (it isn't in the repo; the
+> web clone can't reproduce its 6 vintages): `python scripts/migrate_dedup.py`.
+> It backs up to `data/eurodata.duckdb.bak`, converts NULL→0, collapses exact
+> duplicates (keeps the most-recent `retrieved_at` per key), rebuilds with the
+> sentinel constraint, and refuses to proceed if any `statistic_best` sample
+> value changes. Then fill the post-dedup row/indicator counts into PITCH.md.
+> Migration logic is unit-tested (`tests/test_migrate_dedup.py`) against a
+> synthetic pre-migration DB. Suite: 77 passing, 34 skipped (real-DB fixture).
+
 > **Update (2026-07-13): Startups & Business domain (7th) added** — 6
 > indicators, ids 27–32, +4,380 rows (31,190 total in `statistic_best`):
 > New Business Density / New Businesses Registered (WB Entrepreneurship DB,

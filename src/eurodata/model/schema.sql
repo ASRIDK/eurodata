@@ -71,8 +71,13 @@ CREATE TABLE IF NOT EXISTS statistic_record (
     indicator_id INTEGER NOT NULL,
     source_id INTEGER NOT NULL,
     year INTEGER NOT NULL,
-    quarter INTEGER,
-    month INTEGER,
+    -- 0 (not NULL) is the "not applicable" sentinel for quarter/month: annual
+    -- rows are (0, 0), quarterly (q, 0), monthly (0, m). This is what makes the
+    -- UNIQUE(...) below actually fire -- with NULLs, every key had a NULL and
+    -- `NULL != NULL` meant the constraint (and ON CONFLICT DO NOTHING dedup)
+    -- matched nothing. 0 is never a valid quarter (1-4) or month (1-12).
+    quarter INTEGER NOT NULL DEFAULT 0,
+    month INTEGER NOT NULL DEFAULT 0,
     value DOUBLE,
     unit VARCHAR,
     currency VARCHAR,
