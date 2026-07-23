@@ -1,7 +1,7 @@
 # Eurodata — Pitch Deck
 
 > Open-source European data intelligence platform.
-> 50 countries · 48 indicators · 81,000+ data points · 6 vintages of revision history · 2000–2026
+> 50 countries · 48 indicators · 81,347 data points · 6 dated vintages · 2000–2026
 > Python API + Next.js dashboard + AI analyst
 
 ---
@@ -14,7 +14,10 @@ European open data is **fragmented** across Eurostat, ECB, OECD, World Bank — 
 - Flags **proxy indicators** transparently (e.g., "this CPI is a proxy for HICP")
 - Tracks **vintages and revisions** so you know which version you're looking at — and
   **surfaces them**: a `revisions()` API, a `/revisions` browse page, and an inline
-  "N values revised" chip on the Explore chart
+  "N values revised" chip on the Explore chart. Every ingestion is stored as a dated
+  vintage; the current 6 span 12 days in July 2026, over which no source restated a
+  figure, so the revision views are correct but still empty. They fill in as sources
+  publish restatements on their monthly and quarterly cycles.
 - Provides an **event layer** for before/after causal studies
 - Is fully **reproducible** from raw API responses to final dataset
 
@@ -39,7 +42,18 @@ European open data is **fragmented** across Eurostat, ECB, OECD, World Bank — 
 
 **Problem encountered**: Eurostat's SDMX library hung for 15+ minutes with no timeout, silently swallowing errors. Rewrote to hit the JSON REST API directly with proper timeouts, retries, and error logging. Raw responses are snapshot with SHA256 for reproducibility.
 
-**Current coverage**: 81,347 rows in `statistic_best`, 47 indicators across 9 domains, 50 countries, 2000–2026.
+**Problem encountered**: the `statistic_record` UNIQUE constraint had never fired. Its key included
+`quarter` and `month`, which were NULL for annual rows — and since `NULL != NULL`, every row carried
+a NULL in the key and the constraint matched nothing, so the `ON CONFLICT DO NOTHING` the ingestion
+already used silently deduplicated nothing. A third of the table (147,250 of 436,997 rows) was exact
+duplicates and `ingestion_run.records_processed` was inflated. Fixed by making `quarter`/`month`
+`NOT NULL DEFAULT 0` — 0 being valid for neither — which is the only one of the three candidate
+designs that both enforces uniqueness and leaves `ON CONFLICT DO NOTHING` skipping rather than
+raising on DuckDB 1.5.4. The dedup was verified value-preserving: `statistic_best` is byte-identical
+before and after across all 81,347 rows.
+
+**Current coverage**: 81,347 rows in `statistic_best` (289,747 in `statistic_record` across 6
+vintages), 48 indicators across 9 domains, 50 countries plus 284 NUTS 2 regions, 2000–2026.
 
 ### 2. Python API (`eurodata`)
 

@@ -13,7 +13,9 @@ import { api, type Row } from "@/lib/api";
 const Globe = dynamic(() => import("@/components/ui/globe").then((m) => m.Globe), {
   ssr: false,
   loading: () => (
-    <div className="aspect-square w-[135vmax] max-w-none animate-pulse rounded-full bg-black/5 dark:bg-white/5" />
+    // Same width as the mounted globe below, or the skeleton visibly snaps
+    // when cobe takes over.
+    <div className="aspect-square w-[130vmax] max-w-none animate-pulse rounded-full bg-black/5 dark:bg-white/5" />
   ),
 });
 
