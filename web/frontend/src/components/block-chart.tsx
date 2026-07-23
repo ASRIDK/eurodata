@@ -32,6 +32,12 @@ const COLORS = [
   "#ea580c", "#0891b2", "#ca8a04", "#db2777",
 ];
 
+// Secondary, non-color channel so series stay distinguishable without relying
+// on hue (colour-blind accessibility). Index 0 is solid; applied only to plain
+// multi-series comparison charts (forecast charts reserve dashes to mean
+// "projection", so they opt out — see `nonColor` below).
+const DASH_PATTERNS: (string | undefined)[] = [undefined, "6 4", "2 3", "8 3 2 3", "10 4 2 4"];
+
 function compactNumber(v: unknown): string {
   if (typeof v !== "number") return String(v ?? "");
   return Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 2 }).format(v);
@@ -175,18 +181,39 @@ export function BlockChart({
 
   const hasBand = spec.series.some((s) => s.band && s.band.length > 0);
   const Chart = spec.kind === "area" ? AreaChart : hasBand ? ComposedChart : LineChart;
+  // Right-hand axis appears only when a series opts in (mixed-unit comparison);
+  // otherwise every series shares the single left axis, unchanged.
+  const hasRightAxis = spec.series.some((s) => s.axis === "right");
+  const axisId = (s: ChartSpec["series"][number]) => (s.axis === "right" ? "right" : "left");
+  // Non-color dash encoding kicks in only for plain multi-series charts — never
+  // when the forecast conventions (dashed / band) are in play, so a dashed line
+  // keeps meaning "projection" there rather than "series #2".
+  const nonColor =
+    spec.series.length > 1 && !spec.series.some((s) => s.dashed || (s.band && s.band.length));
+  const dashFor = (s: ChartSpec["series"][number], i: number) =>
+    s.dashed ? "5 4" : nonColor ? DASH_PATTERNS[i % DASH_PATTERNS.length] : undefined;
   return (
     <>
       <ChartFrame unit={spec.unit} title={spec.title}>
         <Chart data={data} margin={{ left: 8, right: 8, top: spec.events?.length ? 18 : 0 }}>
           <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.3} />
           <XAxis dataKey="x" fontSize={11} />
-          <YAxis fontSize={11} tickFormatter={compactNumber} width={55} />
+          <YAxis yAxisId="left" fontSize={11} tickFormatter={compactNumber} width={55} />
+          {hasRightAxis ? (
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              fontSize={11}
+              tickFormatter={compactNumber}
+              width={55}
+            />
+          ) : null}
           <Tooltip formatter={(v, name) => [compactNumber(v), <FlagName key="n" value={name} />]} />
           <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => <FlagName value={v} />} />
           {spec.events?.map((e, idx) => (
             <ReferenceLine
               key={`event-${e.x}-${e.label}`}
+              yAxisId="left"
               x={e.x}
               stroke="currentColor"
               strokeOpacity={0.4}
@@ -198,6 +225,7 @@ export function BlockChart({
             s.band ? (
               <Area
                 key={`${s.name}__band`}
+                yAxisId={axisId(s)}
                 dataKey={`${s.name}__band`}
                 stroke="none"
                 fill={s.color ?? COLORS[i % COLORS.length]}
@@ -213,22 +241,24 @@ export function BlockChart({
             spec.kind === "area" ? (
               <Area
                 key={s.name}
+                yAxisId={axisId(s)}
                 dataKey={s.name}
                 stroke={s.color ?? COLORS[i % COLORS.length]}
                 fill={s.color ?? COLORS[i % COLORS.length]}
                 fillOpacity={0.15}
                 strokeWidth={2}
-                strokeDasharray={s.dashed ? "5 4" : undefined}
+                strokeDasharray={dashFor(s, i)}
                 connectNulls
               />
             ) : (
               <Line
                 key={s.name}
+                yAxisId={axisId(s)}
                 dataKey={s.name}
                 stroke={s.color ?? COLORS[i % COLORS.length]}
                 dot={false}
                 strokeWidth={2}
-                strokeDasharray={s.dashed ? "5 4" : undefined}
+                strokeDasharray={dashFor(s, i)}
                 connectNulls
               />
             ),

@@ -1,5 +1,18 @@
 # eurodata — Session Handoff
 
+> **Update (2026-07-22, frontend a11y follow-ups).** On branch
+> `feat/frontend-a11y-followups` (stacked on PR3). The three items PR3 deferred
+> now ship, build/lint/Playwright-verified: (1) **Explore URL-state sync** —
+> indicator/country/forecast/horizon read from and mirrored to the query string
+> (shareable/bookmarkable); (2) **globe accessibility** — `role="img"` +
+> aria-label on the canvas and an `sr-only` `<nav>` of all 50 countries linking
+> to `/country/[iso3]` (keyboard/screen-reader path); (3) **chart mixed-unit
+> dual-axis + non-color encoding** — optional per-series `axis:"left"|"right"`
+> (+`unitRight`) renders a second Y axis, and plain multi-series line/area charts
+> get distinct dash patterns as a non-colour channel (forecast charts opt out).
+> eslint 0/0, `npm run build` clean, 390px no-overflow retained. Remaining
+> polish: final visual tuning of the dash palette / dual axis.
+
 > **Update (2026-07-22, PR3 — frontend: revisions UI, mobile, per-country
 > correlations).** Stacked on PR2. Mobile navbar rebuilt as a responsive
 > hamburger (aria-expanded/controls, Esc + click-away); verified
