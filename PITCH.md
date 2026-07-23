@@ -166,6 +166,7 @@ Pure numpy/pandas trend extrapolation — **not** prediction. Auto-selects from 
 | `/ranking` | Country rankings by indicator, with CSV export |
 | `/correlations` | Browse the correlation edges, filter by indicator, sort by strength |
 | `/revisions` | Browse how official statistics changed across vintages — largest revisions and most-revised indicators |
+| `/propagate` | Shock an indicator and trace the ripple across the correlation graph, hop by hop, with the path each result arrived by |
 | `/country/[iso3]` | Per-country profile: KPIs, bloc memberships, events, and the country's **own** strongest growth-rate correlations |
 | `/events` | Browse 43 events, run event-study analysis |
 | `/chat` | AI analyst with Gemini — natural language over the dataset |
