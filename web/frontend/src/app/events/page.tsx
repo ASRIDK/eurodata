@@ -38,6 +38,7 @@ export default function Events() {
 
   useEffect(() => {
     if (!studyEvent || !studyIndicator) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing a stale study when the selection becomes incomplete
       setStudy([]);
       return;
     }

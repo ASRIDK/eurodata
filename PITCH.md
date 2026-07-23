@@ -1,7 +1,7 @@
 # Eurodata — Pitch Deck
 
 > Open-source European data intelligence platform.
-> 50 countries · 47 indicators · 81,000+ data points · 2000–2026
+> 50 countries · 48 indicators · 81,000+ data points · 6 vintages of revision history · 2000–2026
 > Python API + Next.js dashboard + AI analyst
 
 ---
@@ -12,7 +12,9 @@ European open data is **fragmented** across Eurostat, ECB, OECD, World Bank — 
 
 - Merges multiple official sources with explicit **reliability scoring**
 - Flags **proxy indicators** transparently (e.g., "this CPI is a proxy for HICP")
-- Tracks **vintages and revisions** so you know which version you're looking at
+- Tracks **vintages and revisions** so you know which version you're looking at — and
+  **surfaces them**: a `revisions()` API, a `/revisions` browse page, and an inline
+  "N values revised" chip on the Explore chart
 - Provides an **event layer** for before/after causal studies
 - Is fully **reproducible** from raw API responses to final dataset
 
@@ -49,9 +51,16 @@ ed.series("FRA", "GDP") # tidy DataFrame with source/provenance
 ed.compare(["FRA", "DEU"], "Unemployment Rate")
 ed.latest("GDP per capita")
 ed.events(country="UKR", since="2020")  # 43 curated events
-ed.correlate("R&D", "GDP per capita")   # per-country Pearson r
+ed.correlate("R&D", "GDP per capita")   # per-country Pearson r on YoY GROWTH (default)
+ed.country_correlations("FRA")          # France's OWN strongest correlations
+ed.revisions("GDP", "FRA")              # vintage-by-vintage revision trail
 ed.forecast("GDP", "FRA", horizon=5)    # trend extrapolation
 ```
+
+**Provenance-first correlation**: `correlate()` / `lagged_correlation()` default to
+year-over-year **growth rates** (`on="growth"`), so two series that merely trend upward
+no longer read as spuriously ~0.99 correlated. `on="levels"` is still available. This is
+the same methodology the structural correlation graph uses.
 
 **Key idea**: Every function is also available as a module-level shortcut (`ed.series(...)`) that auto-opens the bundled database. Unknown names raise `EuroDataLookupError` with "did you mean?" suggestions.
 
@@ -71,6 +80,8 @@ geography (50 countries + 293 NUTS2 regions) ──┬── statistic_record (a
 ```
 
 **Key idea**: The `statistic_record` table preserves **all vintages** — when a source corrects a number, both the old and new versions remain, with vintage dates. `statistic_best` is a view that picks the latest vintage from the highest-reliability source.
+
+**Problem encountered & fixed**: the `UNIQUE(geography_id, indicator_id, source_id, year, quarter, month, vintage_date)` constraint never actually fired. `quarter`/`month` were nullable, so every key carried a NULL and — since `NULL != NULL` — the constraint (and the `ON CONFLICT DO NOTHING` idempotency in the ingestion pipeline) matched nothing; re-ingestion silently accumulated exact duplicates. Fixed by making `quarter`/`month` `NOT NULL DEFAULT 0` (0 = "not applicable"). `statistic_best` already de-duplicated defensively, so the **user-visible dataset is unchanged**; a value-preserving migration (`scripts/migrate_dedup.py`) removes the historical duplicates from the raw table.
 
 **Problem encountered**: The schema started with 2 indicators, grew to 47. Every addition had to be append-only (positional IDs in the seed catalog). Solution: documented this constraint and all additions go at the end of `INDICATORS` list in `reference/catalog.py`.
 
@@ -132,22 +143,24 @@ Pure numpy/pandas trend extrapolation — **not** prediction. Auto-selects from 
 
 ### 8. Web Frontend (Next.js 16)
 
-**5 routes**:
+**Routes**:
 
 | Route | What it does |
 |-------|-------------|
-| `/` (Home) | Stats overview, sources, roadmap — **being rebuilt with full-viewport 3D globe** |
-| `/explore` | Select countries/indicators → line chart + data table. Supports NUTS regions |
-| `/ranking` | Country rankings by indicator |
-| `/correlations` | Browse the 247 correlation edges, filter by indicator, sort by strength |
+| `/` (Home) | Full-viewport interactive 3D globe hero, stats overview, sources |
+| `/explore` | Select countries/indicators → line chart + data table (NUTS regions supported), with an inline revisions chip, staleness badge, forecast accuracy and CSV export |
+| `/ranking` | Country rankings by indicator, with CSV export |
+| `/correlations` | Browse the correlation edges, filter by indicator, sort by strength |
+| `/revisions` | Browse how official statistics changed across vintages — largest revisions and most-revised indicators |
+| `/country/[iso3]` | Per-country profile: KPIs, bloc memberships, events, and the country's **own** strongest growth-rate correlations |
 | `/events` | Browse 43 events, run event-study analysis |
 | `/chat` | AI analyst with Gemini — natural language over the dataset |
 
 **Key idea**: Every page fetches from the FastAPI backend with a single `api<T>()` helper + typed `Row`/`ChartSpec`/`Block` types. The backend wraps the Python API 1:1 — zero business logic in the frontend.
 
-**Problem encountered**: Tailwind v4 migration — shadcn/ui doesn't support v4 yet. Solution: manual `components/ui/` folder with Tailwind-only components, no shadcn dependency.
+**Mobile**: a responsive hamburger navbar; verified no horizontal overflow at a 390px viewport across every route.
 
-**Current build**: 5 pages, all tested with Playwright for loading/error/empty states.
+**Problem encountered**: Tailwind v4 migration — shadcn/ui doesn't support v4 yet. Solution: manual `components/ui/` folder with Tailwind-only components, no shadcn dependency.
 
 ### 9. AI Analyst (Chat)
 
@@ -264,9 +277,12 @@ PYTHONPATH=src .venv/bin/python -m pytest
 
 1. **More NUTS2 indicators** — pipeline supports it, but Eurostat ingestion is per-series
 2. **ECB/OECD stubs** — both return `[]`; need real dataflow wiring
-3. **Bloc data quality** — `geography_bloc` membership data has known issues (verified wrong for some historical periods)
-4. **GDP deflator** — missing; would allow real vs nominal separation
-5. **Health/Social Media domains** — data exists but no event coverage for these domains
-6. **Playwright tests** — need CI integration
-7. **Chat streaming** — currently waits for full response; SSE would improve UX
-8. **Export** — CSV download on correlations/explore pages
+3. **GDP deflator** — missing; would allow real vs nominal separation
+4. **Health/Social Media domains** — data exists but no event coverage for these domains
+5. **Playwright tests** — need CI integration (the frontend is not yet covered by CI)
+6. **Chat streaming** — currently waits for full response; SSE would improve UX
+7. **Frontend polish deferred** — dual-axis for mixed-unit comparisons, a keyboard/text
+   alternative for the globe canvas, non-color series encoding, and Explore URL-state sync
+   remain as follow-ups
+8. **Run the dedup migration** — `scripts/migrate_dedup.py` against the built database
+   (removes the historical `statistic_record` duplicates; value-preserving)

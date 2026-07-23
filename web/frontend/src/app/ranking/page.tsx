@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { BlockChart } from "@/components/block-chart-lazy";
 import { DataTable } from "@/components/data-table";
-import { api, type ChartSpec, type Row } from "@/lib/api";
+import { api, exportUrl, type ChartSpec, type Row } from "@/lib/api";
 import { FlagName } from "@/components/flag";
 
 const TOP_OPTIONS = [5, 10, 20] as const;
@@ -34,6 +34,7 @@ export default function Ranking() {
 
   useEffect(() => {
     if (!indicator) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-change: flip loading/clear error when indicator or bloc changes
     setLoading(true);
     setError(null);
     const params = new URLSearchParams({ indicator });
@@ -132,15 +133,23 @@ export default function Ranking() {
       ) : spec ? (
         <div className="mt-6 space-y-4">
           <BlockChart spec={spec} horizontal />
-          <div className="text-xs text-black/50 dark:text-white/50">
-            Source: {sources.join(", ")}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-black/50 dark:text-white/50">
+            <span>Source: {sources.join(", ")}</span>
             {meta?.is_proxy ? (
-              <span className="ml-2 rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-300">
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-300">
                 proxy — {String(meta.proxy_note ?? "stand-in for the official concept")}
               </span>
             ) : null}
-            {meta?.definition ? <div className="mt-1">{String(meta.definition)}</div> : null}
+            <a
+              href={exportUrl("latest", { indicator, bloc: bloc || undefined })}
+              className="rounded-full bg-black/5 px-2 py-0.5 font-medium hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+            >
+              ↓ CSV
+            </a>
           </div>
+          {meta?.definition ? (
+            <div className="text-xs text-black/50 dark:text-white/50">{String(meta.definition)}</div>
+          ) : null}
           <DataTable
             columns={["rank", "country", "value", "unit", "year"]}
             rows={ranked.map((r, i) => [
