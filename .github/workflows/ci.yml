@@ -7,6 +7,7 @@ on:
 
 jobs:
   test:
+    name: pytest
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -18,4 +19,27 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -e ".[dev]"
+      # data/*.duckdb is gitignored, so the real-database fixtures skip here and
+      # the suite runs against seeded in-memory DBs. The checks that need the
+      # built database (notably the dedup migration) are exercised locally --
+      # see the runbook in HANDOFF.md.
       - run: python -m pytest -q
+
+  frontend:
+    name: next build + eslint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - run: npm ci
+      # eslint first: it is much faster than a full Next build, so a lint
+      # regression fails the job without waiting on compilation.
+      - run: npx eslint src
+      - run: npm run build
