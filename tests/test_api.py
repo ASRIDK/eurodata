@@ -468,3 +468,74 @@ def test_correlation_graph_is_empty_until_the_graph_is_built(db):
     assert edges.empty
     for col in ("indicator_a", "indicator_b", "weight"):
         assert col in edges.columns
+
+
+# --- propagation ------------------------------------------------------------
+
+def _seed_edges(db, rows):
+    """Insert CORRELATES_WITH edges directly, so propagation can be tested
+    without running the full graph builder.
+
+    graph_node.id is an INTEGER PRIMARY KEY with no sequence default, so ids
+    must be assigned explicitly — the same thing scripts/build_graph.py does
+    with its counter. correlation_graph() parses props as JSON and reads
+    relationship/direction/q_value/n_countries, so all four must be present.
+    """
+    def node_id(name):
+        ind_id = db.con.execute(
+            "SELECT id FROM indicator WHERE name = ?", [name]).fetchone()[0]
+        existing = db.con.execute(
+            "SELECT id FROM graph_node WHERE node_type='indicator' AND ref_id = ?",
+            [ind_id]).fetchone()
+        if existing:
+            return existing[0]
+        nid = db.con.execute(
+            "SELECT COALESCE(MAX(id), 0) + 1 FROM graph_node").fetchone()[0]
+        db.con.execute(
+            "INSERT INTO graph_node (id, node_type, ref_id, label) "
+            "VALUES (?, 'indicator', ?, ?)", [nid, ind_id, name])
+        return nid
+
+    for a, b, weight, direction in rows:
+        props = ('{"direction": "%s", "q_value": 0.01, '
+                 '"relationship": "contemporaneous", "n_countries": 5}' % direction)
+        db.con.execute(
+            "INSERT INTO graph_edge (src_node_id, dst_node_id, edge_type, weight, props) "
+            "VALUES (?, ?, 'CORRELATES_WITH', ?, ?)",
+            [node_id(a), node_id(b), weight, props])
+
+
+def test_propagate_ripples_across_indicators(db):
+    _seed_edges(db, [
+        ("Unemployment Rate", "Government Debt (% GDP)", 0.6, "undetermined"),
+        ("Government Debt (% GDP)", "R&D Expenditure (% GDP)", -0.6, "undetermined"),
+    ])
+    out = db.propagate("Unemployment Rate", edge_floor=0.3, threshold=0.05)
+    rows = {r["node"]: r for _, r in out.iterrows()}
+    assert set(rows) == {"Government Debt (% GDP)", "R&D Expenditure (% GDP)"}
+    assert rows["Government Debt (% GDP)"]["hop"] == 1
+    assert rows["Government Debt (% GDP)"]["activation"] > 0
+    # positive shock -> debt up -> R&D down, two hops out
+    assert rows["R&D Expenditure (% GDP)"]["hop"] == 2
+    assert rows["R&D Expenditure (% GDP)"]["activation"] < 0
+    assert rows["R&D Expenditure (% GDP)"]["via"] == "Government Debt (% GDP)"
+    assert list(out.columns) == ["node", "hop", "activation", "via", "path", "directed"]
+
+
+def test_propagate_rejects_an_unknown_node(db):
+    with pytest.raises(EuroDataLookupError):
+        db.propagate("Unemploymnet Rate")
+
+
+def test_propagate_returns_empty_frame_when_the_graph_is_unbuilt(db):
+    out = db.propagate("GDP")
+    assert out.empty
+    assert list(out.columns) == ["node", "hop", "activation", "via", "path", "directed"]
+
+
+def test_propagate_accepts_an_indicator_api_code(db):
+    _seed_edges(db, [("Unemployment Rate", "Government Debt (% GDP)", 0.6,
+                      "undetermined")])
+    # une_rt_a is Unemployment Rate's api_code; _resolve_indicator accepts either
+    out = db.propagate("une_rt_a", edge_floor=0.3)
+    assert "Government Debt (% GDP)" in set(out["node"])

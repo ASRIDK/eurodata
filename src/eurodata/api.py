@@ -27,6 +27,7 @@ import pandas as pd
 from eurodata.config import get_settings
 from eurodata.db import connect as _connect
 from eurodata._forecast import forecast_values
+from eurodata.graph.propagate import propagate as _propagate_core
 
 
 class EuroDataLookupError(LookupError):
@@ -881,6 +882,64 @@ class EuroData:
                  .reset_index(drop=True))
         return out.head(limit) if limit else out
 
+    _PROPAGATE_COLUMNS = ["node", "hop", "activation", "via", "path", "directed"]
+
+    def propagate(self, node: str, *, country: str | None = None,
+                  shock: float = 1.0, max_hops: int = 3, decay: float = 0.6,
+                  threshold: float = 0.05, edge_floor: float = 0.30
+                  ) -> pd.DataFrame:
+        """Trace how a shock to one indicator ripples through the others.
+
+        Walks the signed `CORRELATES_WITH` edges outward from `node`, reporting
+        each indicator reached, the hop it was reached at, the signed activation
+        that arrived, and the route it took. Pass `country` to walk that
+        country's own correlations (`country_correlations`) instead of the
+        Europe-wide pooled ones (`correlation_graph`).
+
+        This is historical co-movement, not causation or forecast: most edges
+        carry no confirmed direction, so `directed` is True only when every edge
+        on a result's path was Granger-confirmed.
+
+        Defaults are calibrated against the built graph -- see
+        docs/superpowers/specs/2026-07-23-propagation-engine-design.md. In
+        particular `edge_floor` is what produces multi-hop structure; at 0 the
+        graph is dense enough that almost everything lands on hop 1.
+
+        Columns: node, hop, activation, via, path, directed. Empty (with those
+        columns) when the graph has not been built.
+        """
+        name = self.query("SELECT name FROM indicator WHERE id = ?",
+                          [self._resolve_indicator(node)]).iloc[0, 0]
+        if country is None:
+            edges_df = self.correlation_graph()
+            weight_col = "weight"
+        else:
+            self._resolve_country(country)   # raises EuroDataLookupError if unknown
+            edges_df = self.country_correlations(country, limit=None)
+            weight_col = "correlation"
+        if edges_df.empty:
+            return pd.DataFrame(columns=self._PROPAGATE_COLUMNS)
+
+        # country_correlations carries no `direction` column -- per-country
+        # correlations are plain co-movement, so every edge is symmetric there.
+        directions = (edges_df["direction"] if "direction" in edges_df.columns
+                      else pd.Series(["undetermined"] * len(edges_df)))
+        edges = [
+            (str(a), str(b), float(w), str(d))
+            for a, b, w, d in zip(edges_df["indicator_a"], edges_df["indicator_b"],
+                                  edges_df[weight_col], directions, strict=True)
+        ]
+        activations = _propagate_core(
+            edges, name, shock=shock, max_hops=max_hops, decay=decay,
+            threshold=threshold, edge_floor=edge_floor)
+        if not activations:
+            return pd.DataFrame(columns=self._PROPAGATE_COLUMNS)
+        return pd.DataFrame([
+            {"node": a.node, "hop": a.hop, "activation": a.activation,
+             "via": a.via, "path": " → ".join(a.path), "directed": a.directed}
+            for a in activations
+        ])
+
 
 # --- module-level default handle -----------------------------------------
 _default: EuroData | None = None
@@ -940,6 +999,7 @@ lagged_correlation = _delegate("lagged_correlation")
 indicator_trends = _delegate("indicator_trends")
 query = _delegate("query")
 relation = _delegate("relation")
+propagate = _delegate("propagate")
 
 __all__ = [
     "EuroData", "EuroDataLookupError", "open",
@@ -950,5 +1010,5 @@ __all__ = [
     "compare", "forecast", "coverage",
     "ingestion_summary", "events", "event_types", "event_study",
     "correlate", "lagged_correlation", "indicator_trends", "correlation_graph",
-    "query", "relation",
+    "query", "relation", "propagate",
 ]
