@@ -1,5 +1,27 @@
 # eurodata — Session Handoff
 
+> **Update (2026-07-23, propagation engine).** `/propagate` ships: shock one
+> indicator, follow signed activation along the `CORRELATES_WITH` edges, read the
+> result as a cascade of hops. Core is `src/eurodata/graph/propagate.py` (pure, no
+> DB or pandas import), surfaced via `ed.propagate()`, `GET /api/propagate`, and
+> the page. Spec and its calibration measurements:
+> `docs/superpowers/specs/2026-07-23-propagation-engine-design.md`.
+>
+> Two graph properties shaped the algorithm and are worth knowing before tuning:
+> summing arrivals saturates (a shock reaches 30 of 36 indicators), hence
+> strongest-path rather than accumulation; and without `edge_floor` almost
+> everything lands on hop 1, because at median degree 14 a direct edge beats a
+> two-hop product. Defaults `decay=0.6 threshold=0.05 edge_floor=0.30 max_hops=3`
+> give ~13 nodes over two hops for a typical shock.
+>
+> **Known limitation:** those defaults were calibrated against the *pooled*
+> `correlation_graph()` only. They do not transfer to `propagate(country=...)`,
+> where per-country correlations are uniformly stronger — ESP returns 27 nodes,
+> DEU 17, FRA 23, and raising `edge_floor` barely helps (ESP at 0.6 still returns
+> 19). The page drives the pooled mode only, so the default user path is the
+> calibrated one; per-country needs its own calibration before it is exposed in
+> the UI.
+
 > **Update (2026-07-23, CI + source monitoring + api coverage).** PRs #1-#5 are
 > merged to `main`; the dedup migration has been run against the production
 > database (436,997 → 289,747 rows, `statistic_best` byte-identical). Added
