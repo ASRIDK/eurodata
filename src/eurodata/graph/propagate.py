@@ -98,9 +98,9 @@ def propagate(edges: list[Edge], source: str, *, shock: float = 1.0,
     only if it beats the node's current best magnitude, which is also what makes
     cycles terminate -- no visited set is needed. A node's `hop` is the hop at
     which its strongest arrival was found, so a node can move to a later hop if a
-    stronger route turns up (its downstream is not re-expanded; with `max_hops`
-    in single digits the difference is immaterial and the reported path always
-    matches the reported activation).
+    stronger route turns up; it is then re-expanded on the following hop, so its
+    downstream sees the improvement. The reported path always matches the
+    reported activation.
 
     Returns activations sorted by hop, then by descending magnitude. The source
     itself is never included.
@@ -142,4 +142,20 @@ def propagate(edges: list[Edge], source: str, *, shock: float = 1.0,
         # A variant can be reached indirectly even once its direct edge is gone;
         # a ripple reporting the source affecting itself is noise.
         out = [a for a in out if not is_variant(a.node, source)]
-    return sorted(out, key=lambda a: (a.hop, -abs(a.activation)))
+    out.sort(key=lambda a: (a.hop, -abs(a.activation)))
+    if collapse_variants:
+        # Variants of *each other* are equally redundant: a shock to
+        # unemployment reported GDP and GDP per capita as separate results with
+        # the same -0.075, which reads as two findings and is one. Keep the
+        # first of each cluster -- the list is already ordered by hop then
+        # descending magnitude, so that is the most direct, strongest member.
+        # is_variant is a prefix test rather than an equivalence relation (GDP
+        # matches both "GDP per capita" and "GDP Growth (quarterly)", which do
+        # not match each other), so this greedy pass is deliberate: it compares
+        # against what has been kept, not against every candidate.
+        kept: list[Activation] = []
+        for a in out:
+            if not any(is_variant(a.node, k.node) for k in kept):
+                kept.append(a)
+        out = kept
+    return out
