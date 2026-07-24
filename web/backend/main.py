@@ -252,6 +252,14 @@ def country_correlations(country: str, limit: int = 20) -> dict:
     return {"rows": df_records(df)}
 
 
+@app.get("/api/country-profile")
+def country_profile(country: str) -> dict:
+    """Structured facts a country profile summarizes: identity, blocs, headline
+    indicators with rank and European median, and its most distinctive decade
+    movers. Unknown country -> 404 via the EuroDataLookupError handler."""
+    return _query("country_profile", country=country)
+
+
 @app.get("/api/propagate")
 def propagate(node: str, country: str | None = None, shock: float = 1.0,
               max_hops: int = 3, decay: float = 0.6, threshold: float = 0.05,
