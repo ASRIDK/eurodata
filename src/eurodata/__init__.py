@@ -10,7 +10,7 @@ from eurodata.api import (  # noqa: F401
     country_blocs, country_indicators, country_profile, country_correlations,
     compare, forecast, coverage, ingestion_summary,
     events, event_types, event_study, correlate, lagged_correlation,
-    query, relation, propagate,
+    indicator_trends, convergence, query, relation, propagate,
 )
 
 __version__ = "0.2.0"
