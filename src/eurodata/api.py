@@ -27,6 +27,7 @@ import pandas as pd
 from eurodata.config import get_settings
 from eurodata.db import connect as _connect
 from eurodata._forecast import forecast_values
+from eurodata.graph.propagate import propagate as _propagate_core
 
 
 class EuroDataLookupError(LookupError):
@@ -832,6 +833,131 @@ class EuroData:
         return self.lagged_correlation(indicator_a, indicator_b, lag=0,
                                        min_years=min_years, on=on)
 
+    # The headline figures a country profile leads with. Kept here rather than
+    # in the frontend so rank and median are computed where the data is.
+    PROFILE_INDICATORS = ("GDP", "GDP per capita", "Population",
+                          "Unemployment Rate", "Inflation (HICP)")
+
+    def country_profile(self, country: str, *, trend_years: int = 10) -> dict:
+        """Everything a country profile summary needs, as structured facts.
+
+        Returns the country's identity, its bloc memberships with join years,
+        each headline indicator with its value *and* its rank and the European
+        median for context, and the indicators that moved most over the last
+        ``trend_years``.
+
+        Facts, not prose: ranks and deltas are computed here where the data is
+        and can be tested, and the page composes sentences from them, so the
+        wording can never drift from the numbers rendered beside it.
+
+        A rank is simply the position when every country's latest value is
+        sorted high to low -- it carries no judgement about whether high is
+        good, which varies by indicator.
+        """
+        geo_id = self._resolve_country(country)
+        row = self.query(
+            "SELECT COALESCE(iso3, code) AS iso3, iso2, name FROM geography "
+            "WHERE id = ?", [geo_id])
+        if row.empty:
+            raise EuroDataLookupError(f"Unknown country: {country!r}")
+        iso3 = str(row.iloc[0]["iso3"])
+
+        headline = []
+        for name in self.PROFILE_INDICATORS:
+            try:
+                across = self.latest(name)
+            except EuroDataLookupError:
+                continue
+            if across.empty or iso3 not in set(across["iso3"]):
+                continue
+            mine = across[across["iso3"] == iso3].iloc[0]
+            ordered = across.sort_values("value", ascending=False).reset_index(drop=True)
+            rank = int(ordered.index[ordered["iso3"] == iso3][0]) + 1
+            headline.append({
+                "indicator": name,
+                "value": float(mine["value"]),
+                "unit": None if pd.isna(mine["unit"]) else str(mine["unit"]),
+                "period": str(mine["period"]),
+                "rank": rank,
+                "of": int(len(ordered)),
+                "median": float(across["value"].median()),
+            })
+
+        # "Fastest rising/falling" is deliberately measured relative to peers,
+        # not in raw percent. A raw proportional change is dominated by
+        # rate/percentage indicators with near-zero baselines (an interest rate
+        # going 0.5 -> 3.7 reads as "+620%"), and it surfaces Europe-wide shifts
+        # that say nothing about this country. Instead: this country's decade
+        # change per indicator, ranked as a percentile against every country's
+        # decade change for the same indicator, in the indicator's own units.
+        # A high percentile means it rose more here than almost anywhere; that
+        # is the distinctive story. The interest-rate rise -- which happened
+        # everywhere -- lands mid-pack and does not win.
+        changes = self.query("""
+            WITH win AS (
+                SELECT s.geography_id, s.indicator_id, s.year, s.value,
+                       COALESCE(s.unit, i.unit) AS unit, i.name AS indicator
+                FROM statistic_best s
+                JOIN indicator i ON i.id = s.indicator_id
+                JOIN geography g ON g.id = s.geography_id
+                WHERE g.level = 'country' AND s.value IS NOT NULL
+                  AND s.year >= (SELECT MAX(year) FROM statistic_best) - ?
+            )
+            SELECT geography_id, indicator, ANY_VALUE(unit) AS unit,
+                   MIN(year) AS from_year, MAX(year) AS to_year,
+                   arg_max(value, year) - arg_min(value, year) AS change
+            FROM win GROUP BY geography_id, indicator
+            HAVING MIN(year) < MAX(year)""", [trend_years])
+
+        rising = falling = None
+        if not changes.empty:
+            # Percentile of each country's change within its indicator's
+            # cross-country distribution. Needs a few peers to mean anything.
+            counts = changes.groupby("indicator")["change"].transform("size")
+            changes = changes[counts >= 5]
+            changes = changes.assign(
+                pct=changes.groupby("indicator")["change"].rank(pct=True))
+            mine = changes[changes["geography_id"] == geo_id]
+            if not mine.empty:
+                def _fact(r):
+                    return {"indicator": str(r["indicator"]),
+                            "change": float(r["change"]),
+                            "percentile": round(float(r["pct"]) * 100.0),
+                            "unit": None if pd.isna(r["unit"]) else str(r["unit"]),
+                            "from_year": int(r["from_year"]),
+                            "to_year": int(r["to_year"])}
+                top = mine.loc[mine["pct"].idxmax()]
+                bottom = mine.loc[mine["pct"].idxmin()]
+                # Only claim "rising" if it actually rose (and fell, for
+                # falling) -- a top-percentile change can still be a decline if
+                # every country declined.
+                if top["change"] > 0:
+                    rising = _fact(top)
+                if bottom["change"] < 0:
+                    falling = _fact(bottom)
+
+        coverage = self.query(
+            "SELECT COUNT(DISTINCT indicator_id) AS n, MAX(year) AS last_year "
+            "FROM statistic_best WHERE geography_id = ?", [geo_id])
+        blocs = self.country_blocs(iso3)
+        return {
+            "iso3": iso3,
+            "iso2": None if pd.isna(row.iloc[0]["iso2"]) else str(row.iloc[0]["iso2"]),
+            "name": str(row.iloc[0]["name"]),
+            # pd.isna, not `is None`: a nullable-int column yields pd.NA for a
+            # current member (no until_year), which `is None` does not catch.
+            "blocs": [{"code": str(b["bloc_code"]), "name": str(b["bloc_name"]),
+                       "since_year": None if pd.isna(b["since_year"]) else int(b["since_year"]),
+                       "until_year": None if pd.isna(b["until_year"]) else int(b["until_year"])}
+                      for _, b in blocs.iterrows()],
+            "headline": headline,
+            "fastest_rising": rising,
+            "fastest_falling": falling,
+            "n_indicators": int(coverage.iloc[0]["n"] or 0),
+            "last_year": None if pd.isna(coverage.iloc[0]["last_year"])
+                         else int(coverage.iloc[0]["last_year"]),
+        }
+
     def country_correlations(self, country: str, *, min_years: int = 8,
                              limit: int | None = 20) -> pd.DataFrame:
         """This country's own growth-rate correlations for the indicator pairs
@@ -881,6 +1007,238 @@ class EuroData:
                  .reset_index(drop=True))
         return out.head(limit) if limit else out
 
+    # -- convergence ------------------------------------------------------
+    _CONVERGENCE_COLUMNS = ["iso3", "country", "initial_year", "initial_value",
+                            "final_year", "final_value", "annualized_growth",
+                            "log_initial"]
+
+    def convergence(self, indicator: str, *, countries: list[str] | None = None,
+                    bloc: str | None = None, start: int | None = None,
+                    end: int | None = None) -> pd.DataFrame:
+        r"""Beta- and sigma-convergence analysis for one indicator.
+
+        The canonical growth-economics test of whether lower-level units catch
+        up with higher-level ones. Intended for **positive level** indicators
+        (GDP per capita, population, …); non-positive observations are dropped
+        because the analysis works in logs.
+
+        The returned DataFrame is the **beta-convergence scatter** — one row per
+        unit with its initial and final level and its annualized log-growth (in
+        %/yr), sorted poorest-first — directly plottable as growth vs. log
+        initial level. Everything else hangs off ``df.attrs``:
+
+        - ``attrs['beta']`` — the OLS of annualized growth on ``log_initial``:
+          ``coefficient`` (%/yr per log-unit; **negative ⇒ convergence**),
+          ``intercept``, ``std_err``, ``t_stat``, ``p_value`` (two-sided, Fisher
+          z normal approximation — same method as ``correlate``), ``r_squared``,
+          ``n``, ``converging`` (coefficient < 0), and the implied ``speed``
+          (λ solving ``coefficient/100 = -(1-e^{-λT})/T`` with T the mean unit
+          span) and ``half_life`` (``ln 2 / λ``, years). Stats are ``None`` when
+          fewer than 3 units qualify.
+        - ``attrs['sigma']`` — a per-year DataFrame (``year``, ``n``, ``sd_log``
+          = cross-unit SD of ``ln(value)``, ``cv`` = coefficient of variation,
+          ``mean_log``). Falling ``sd_log`` over time is sigma-convergence.
+        - ``attrs['sigma_trend']`` — OLS of ``sd_log`` on year: ``slope``,
+          ``p_value``, ``converging`` (slope < 0), ``start_dispersion``,
+          ``end_dispersion``.
+
+        Descriptive, not causal: unconditional convergence says nothing about
+        *why* units converge (technology diffusion, cohesion transfers, mean
+        reversion). Filter the unit set with ``countries`` / ``bloc`` and the
+        window with ``start`` / ``end``.
+        """
+        frame = self._indicator_frame(indicator)  # iso3, year, value; validates name
+        if start is not None:
+            frame = frame[frame["year"] >= start]
+        if end is not None:
+            frame = frame[frame["year"] <= end]
+        frame = frame[frame["value"] > 0]  # log-based: positive levels only
+
+        allow: set[str] | None = None
+        if countries is not None:
+            allow = {self._con.execute(
+                        "SELECT COALESCE(iso3, code) FROM geography WHERE id = ?",
+                        [self._resolve_country(c)]).fetchone()[0]
+                     for c in countries}
+        if bloc is not None:
+            members = set(self.bloc_members(bloc)["iso3"])  # validates bloc
+            allow = members if allow is None else (allow & members)
+        if allow is not None:
+            frame = frame[frame["iso3"].isin(allow)]
+
+        names = self.query("SELECT COALESCE(iso3, code) AS iso3, name FROM geography")
+        name_map = dict(zip(names["iso3"], names["name"], strict=False))
+
+        rows = []
+        for iso3, grp in frame.groupby("iso3"):
+            grp = grp.sort_values("year")
+            first, last = grp.iloc[0], grp.iloc[-1]
+            span = int(last["year"]) - int(first["year"])
+            if span <= 0:  # need a start and a later end to measure growth
+                continue
+            g = (math.log(last["value"]) - math.log(first["value"])) / span
+            rows.append({
+                "iso3": iso3, "country": name_map.get(iso3, iso3),
+                "initial_year": int(first["year"]),
+                "initial_value": float(first["value"]),
+                "final_year": int(last["year"]),
+                "final_value": float(last["value"]),
+                "annualized_growth": g * 100.0,
+                "log_initial": math.log(float(first["value"])),
+            })
+        scatter = (pd.DataFrame(rows, columns=self._CONVERGENCE_COLUMNS)
+                     .sort_values("log_initial").reset_index(drop=True))
+
+        sigma = self._sigma_series(frame)
+        scatter.attrs["beta"] = self._beta_stats(scatter)
+        scatter.attrs["sigma"] = sigma
+        scatter.attrs["sigma_trend"] = self._sigma_trend(sigma)
+        scatter.attrs["indicator"] = indicator
+        scatter.attrs["start"] = start
+        scatter.attrs["end"] = end
+        return scatter
+
+    @staticmethod
+    def _beta_stats(scatter: pd.DataFrame) -> dict:
+        """OLS of annualized growth (%/yr) on log initial level + convergence
+        speed. Slope < 0 is beta-convergence."""
+        n = len(scatter)
+        out = {"coefficient": None, "intercept": None, "std_err": None,
+               "t_stat": None, "p_value": None, "r_squared": None, "n": n,
+               "speed": None, "half_life": None, "converging": None}
+        if n < 3:
+            return out
+        x = scatter["log_initial"].to_numpy(dtype=float)
+        y = scatter["annualized_growth"].to_numpy(dtype=float)
+        xbar, ybar = x.mean(), y.mean()
+        sxx = float(((x - xbar) ** 2).sum())
+        if sxx == 0:
+            return out
+        b = float(((x - xbar) * (y - ybar)).sum() / sxx)
+        a = float(ybar - b * xbar)
+        resid = y - (a + b * x)
+        ssr = float((resid ** 2).sum())
+        sst = float(((y - ybar) ** 2).sum())
+        r2 = 1.0 - ssr / sst if sst > 0 else None
+        if ssr > 0:
+            se = math.sqrt((ssr / (n - 2)) / sxx)
+            t = b / se
+        else:  # perfect fit: zero residual variance
+            se = 0.0
+            t = math.inf if b > 0 else (-math.inf if b < 0 else 0.0)
+        # slope and Pearson r share a t-test, so r's two-sided p is the slope's.
+        r = math.copysign(math.sqrt(r2), b) if r2 is not None else float("nan")
+        p, _, _ = _pearson_stats(r, n)
+        # Convergence speed λ from the decimal-scale slope: b/100 = -(1-e^{-λT})/T
+        span = float((scatter["final_year"] - scatter["initial_year"]).mean())
+        b_dec = b / 100.0
+        speed = half = None
+        if span > 0 and (1.0 + b_dec * span) > 0:
+            speed = -math.log(1.0 + b_dec * span) / span
+            if speed > 0:
+                half = math.log(2) / speed
+        out.update(coefficient=b, intercept=a, std_err=se, t_stat=t, p_value=p,
+                   r_squared=r2, speed=speed, half_life=half, converging=bool(b < 0))
+        return out
+
+    @staticmethod
+    def _sigma_series(frame: pd.DataFrame) -> pd.DataFrame:
+        """Cross-unit dispersion of ln(value) per year (sigma-convergence)."""
+        cols = ["year", "n", "sd_log", "cv", "mean_log"]
+        rows = []
+        for year, grp in frame.groupby("year"):
+            vals = grp["value"].to_numpy(dtype=float)
+            vals = vals[vals > 0]
+            if len(vals) < 2:
+                continue
+            logs = np.log(vals)
+            mean = float(vals.mean())
+            rows.append({"year": int(year), "n": int(len(vals)),
+                         "sd_log": float(logs.std(ddof=1)),
+                         "cv": float(vals.std(ddof=1) / mean) if mean else None,
+                         "mean_log": float(logs.mean())})
+        return pd.DataFrame(rows, columns=cols).sort_values("year").reset_index(drop=True)
+
+    @staticmethod
+    def _sigma_trend(sigma: pd.DataFrame) -> dict:
+        """OLS of sd_log on year. Slope < 0 is sigma-convergence."""
+        out = {"slope": None, "p_value": None, "converging": None,
+               "start_dispersion": None, "end_dispersion": None}
+        if len(sigma) < 2:
+            return out
+        x = sigma["year"].to_numpy(dtype=float)
+        y = sigma["sd_log"].to_numpy(dtype=float)
+        xbar, ybar = x.mean(), y.mean()
+        sxx = float(((x - xbar) ** 2).sum())
+        syy = float(((y - ybar) ** 2).sum())
+        if sxx == 0:
+            return out
+        slope = float(((x - xbar) * (y - ybar)).sum() / sxx)
+        r = (float(((x - xbar) * (y - ybar)).sum() / math.sqrt(sxx * syy))
+             if syy > 0 else float("nan"))
+        p, _, _ = _pearson_stats(r, len(sigma))
+        out.update(slope=slope, p_value=p, converging=bool(slope < 0),
+                   start_dispersion=float(y[0]), end_dispersion=float(y[-1]))
+        return out
+
+    _PROPAGATE_COLUMNS = ["node", "hop", "activation", "via", "path", "directed"]
+
+    def propagate(self, node: str, *, country: str | None = None,
+                  shock: float = 1.0, max_hops: int = 3, decay: float = 0.6,
+                  threshold: float = 0.05, edge_floor: float = 0.30
+                  ) -> pd.DataFrame:
+        """Trace how a shock to one indicator ripples through the others.
+
+        Walks the signed `CORRELATES_WITH` edges outward from `node`, reporting
+        each indicator reached, the hop it was reached at, the signed activation
+        that arrived, and the route it took. Pass `country` to walk that
+        country's own correlations (`country_correlations`) instead of the
+        Europe-wide pooled ones (`correlation_graph`).
+
+        This is historical co-movement, not causation or forecast: most edges
+        carry no confirmed direction, so `directed` is True only when every edge
+        on a result's path was Granger-confirmed.
+
+        Defaults are calibrated against the built graph -- see
+        docs/superpowers/specs/2026-07-23-propagation-engine-design.md. In
+        particular `edge_floor` is what produces multi-hop structure; at 0 the
+        graph is dense enough that almost everything lands on hop 1.
+
+        Columns: node, hop, activation, via, path, directed. Empty (with those
+        columns) when the graph has not been built.
+        """
+        name = self.query("SELECT name FROM indicator WHERE id = ?",
+                          [self._resolve_indicator(node)]).iloc[0, 0]
+        if country is None:
+            edges_df = self.correlation_graph()
+            weight_col = "weight"
+        else:
+            self._resolve_country(country)   # raises EuroDataLookupError if unknown
+            edges_df = self.country_correlations(country, limit=None)
+            weight_col = "correlation"
+        if edges_df.empty:
+            return pd.DataFrame(columns=self._PROPAGATE_COLUMNS)
+
+        # country_correlations carries no `direction` column -- per-country
+        # correlations are plain co-movement, so every edge is symmetric there.
+        directions = (edges_df["direction"] if "direction" in edges_df.columns
+                      else pd.Series(["undetermined"] * len(edges_df)))
+        edges = [
+            (str(a), str(b), float(w), str(d))
+            for a, b, w, d in zip(edges_df["indicator_a"], edges_df["indicator_b"],
+                                  edges_df[weight_col], directions, strict=True)
+        ]
+        activations = _propagate_core(
+            edges, name, shock=shock, max_hops=max_hops, decay=decay,
+            threshold=threshold, edge_floor=edge_floor)
+        if not activations:
+            return pd.DataFrame(columns=self._PROPAGATE_COLUMNS)
+        return pd.DataFrame([
+            {"node": a.node, "hop": a.hop, "activation": a.activation,
+             "via": a.via, "path": " → ".join(a.path), "directed": a.directed}
+            for a in activations
+        ])
+
 
 # --- module-level default handle -----------------------------------------
 _default: EuroData | None = None
@@ -928,6 +1286,7 @@ revisions_summary = _delegate("revisions_summary")
 country_blocs = _delegate("country_blocs")
 country_indicators = _delegate("country_indicators")
 country_correlations = _delegate("country_correlations")
+country_profile = _delegate("country_profile")
 compare = _delegate("compare")
 forecast = _delegate("forecast")
 coverage = _delegate("coverage")
@@ -938,17 +1297,19 @@ event_study = _delegate("event_study")
 correlate = _delegate("correlate")
 lagged_correlation = _delegate("lagged_correlation")
 indicator_trends = _delegate("indicator_trends")
+convergence = _delegate("convergence")
 query = _delegate("query")
 relation = _delegate("relation")
+propagate = _delegate("propagate")
 
 __all__ = [
     "EuroData", "EuroDataLookupError", "open",
     "countries", "blocs", "bloc_members", "domains", "indicators", "sources",
     "years", "search_indicators", "series", "latest", "provenance",
     "revisions", "revisions_summary",
-    "country_blocs", "country_indicators", "country_correlations",
+    "country_blocs", "country_indicators", "country_profile", "country_correlations",
     "compare", "forecast", "coverage",
     "ingestion_summary", "events", "event_types", "event_study",
     "correlate", "lagged_correlation", "indicator_trends", "correlation_graph",
-    "query", "relation",
+    "convergence", "query", "relation", "propagate",
 ]

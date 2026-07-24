@@ -7,10 +7,10 @@ from eurodata.api import (  # noqa: F401
     EuroData, EuroDataLookupError, open,
     countries, blocs, bloc_members, domains, indicators, sources, years,
     search_indicators, series, latest, provenance, revisions, revisions_summary,
-    country_blocs, country_indicators, country_correlations,
+    country_blocs, country_indicators, country_profile, country_correlations,
     compare, forecast, coverage, ingestion_summary,
     events, event_types, event_study, correlate, lagged_correlation,
-    query, relation,
+    indicator_trends, convergence, query, relation, propagate,
 )
 
 __version__ = "0.2.0"

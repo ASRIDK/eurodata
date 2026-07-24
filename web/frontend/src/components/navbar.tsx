@@ -12,6 +12,7 @@ const LINKS = [
   { href: "/explore", label: "Explore" },
   { href: "/ranking", label: "Ranking" },
   { href: "/correlations", label: "Correlations" },
+  { href: "/propagate", label: "Propagate" },
   { href: "/revisions", label: "Revisions" },
   { href: "/events", label: "Events" },
   { href: "/chat", label: "AI Chat" },

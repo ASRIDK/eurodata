@@ -1,5 +1,51 @@
 # eurodata — Session Handoff
 
+> **Update (2026-07-24, country profiles + maps).** `/country/[iso3]` now leads
+> with a data-composed summary and two choropleths, and the correlations section
+> is removed. `EuroData.country_profile()` returns the facts (rank, European
+> median, blocs, most distinctive decade movers); the frontend composes the
+> prose so it can't drift from the numbers. "Fastest rising/falling" is a
+> cross-country percentile of the decade change, not raw percent — raw percent
+> was dominated by rate indicators with near-zero baselines and surfaced
+> Europe-wide shifts (see spec). `components/choropleth.tsx` is a dependency-free
+> SVG map; two GISCO GeoJSON files are vendored under `web/frontend/public/geo/`
+> via `scripts/fetch_geometry.py` (NUTS **2024**, countries joined on ISO3_CODE).
+> Spec: `docs/superpowers/specs/2026-07-23-country-profile-summary-and-maps-design.md`.
+> Verified: 167 pytest, eslint 0, build clean, browser-driven for a full-data
+> country (FRA), a no-regional-data country (ISL), and Kosovo (no GISCO geometry,
+> renders unhighlighted with a note).
+>
+> **Regional coverage: 33 of 50 countries.** The other 17 show a national-level
+> context map and an honest "no regional data" state. Filling them is specced
+> separately (`2026-07-23-subnational-coverage-expansion-design.md`) and **not
+> yet implemented** — it is a data-sourcing project: 5 are microstates (no
+> subdivisions), 8 are in DOSE V2.14 (RUS/UKR/CHE/GEO/AZE/BLR/BIH/GBR), 4 need
+> bespoke national sources. **Blocking check before starting it:** GADM geometry
+> prohibits commercial redistribution, so its vendoring must be confirmed or
+> Natural Earth admin-1 used instead.
+
+> **Update (2026-07-23, propagation engine).** `/propagate` ships: shock one
+> indicator, follow signed activation along the `CORRELATES_WITH` edges, read the
+> result as a cascade of hops. Core is `src/eurodata/graph/propagate.py` (pure, no
+> DB or pandas import), surfaced via `ed.propagate()`, `GET /api/propagate`, and
+> the page. Spec and its calibration measurements:
+> `docs/superpowers/specs/2026-07-23-propagation-engine-design.md`.
+>
+> Two graph properties shaped the algorithm and are worth knowing before tuning:
+> summing arrivals saturates (a shock reaches 30 of 36 indicators), hence
+> strongest-path rather than accumulation; and without `edge_floor` almost
+> everything lands on hop 1, because at median degree 14 a direct edge beats a
+> two-hop product. Defaults `decay=0.6 threshold=0.05 edge_floor=0.30 max_hops=3`
+> give ~13 nodes over two hops for a typical shock.
+>
+> **Known limitation:** those defaults were calibrated against the *pooled*
+> `correlation_graph()` only. They do not transfer to `propagate(country=...)`,
+> where per-country correlations are uniformly stronger — ESP returns 27 nodes,
+> DEU 17, FRA 23, and raising `edge_floor` barely helps (ESP at 0.6 still returns
+> 19). The page drives the pooled mode only, so the default user path is the
+> calibrated one; per-country needs its own calibration before it is exposed in
+> the UI.
+
 > **Update (2026-07-23, CI + source monitoring + api coverage).** PRs #1-#5 are
 > merged to `main`; the dedup migration has been run against the production
 > database (436,997 → 289,747 rows, `statistic_best` byte-identical). Added
