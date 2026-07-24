@@ -1,0 +1,67 @@
+name: Data refresh
+
+# Weekly, the pipeline rebuilds the database from source, runs the data-quality
+# gate, and publishes a fresh Parquet release + updates the "data" freshness
+# badge. A blocking quality contract (see eurodata.ingest.quality) fails the run
+# rather than publishing a broken release, so the badge only ever advances on a
+# clean refresh.
+
+on:
+  schedule:
+    # Tuesdays 05:00 UTC — a day after the source-health probe, so a known-bad
+    # upstream is already flagged before we spend a full refresh on it.
+    - cron: "0 5 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # The World Bank fetcher paces ~34 series a second apart with backoff, so a
+    # full refresh is several minutes; this is a ceiling, not a target.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -e ".[dev]"
+
+      - name: Build schema + seed reference data
+        run: python scripts/init_db.py
+
+      - name: Run the orchestrated pipeline (ingest → graph → quality gate → release)
+        env:
+          PREFECT_LOGGING_LEVEL: INFO
+        run: python -m flows.ingestion
+
+      - name: Refresh the data-freshness badge
+        run: python scripts/emit_freshness_badge.py
+
+      - name: Upload the Parquet release
+        uses: actions/upload-artifact@v4
+        with:
+          name: eurodata-release
+          path: data/releases/**
+          if-no-files-found: warn
+
+      - name: Commit the updated freshness badge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/badges/data-freshness.json
+          if git diff --cached --quiet; then
+            echo "Badge unchanged."
+          else
+            git commit -m "chore(data): refresh freshness badge [skip ci]"
+            git push
+          fi
