@@ -5,14 +5,14 @@
 [![data](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ASRIDK/eurodata/main/.github/badges/data-freshness.json)](https://github.com/ASRIDK/eurodata/actions/workflows/data-refresh.yml)
 
 Open-source **European data intelligence platform**: a Python-importable dataset,
-a reproducible ingestion pipeline, and an exploratory Streamlit dashboard for
-studying Europe through open data — economy, demographics, digital, energy &
-climate, AI & technology, plus a curated **event layer** for before/after
-analysis.
+a reproducible ingestion pipeline, a FastAPI service and exploratory Streamlit +
+Next.js frontends for studying Europe through open data — economy, demographics,
+digital, energy & climate, AI & technology, plus a curated **event layer** for
+before/after analysis.
 
-- **Facts** — ~32k current official statistics (32 indicators × 49 countries ×
-  2000–2025; ~72k rows including revision history) in a single DuckDB fact
-  table with revision lineage and per-record source.
+- **Facts** — ~81k current official statistics (48 indicators across 50 countries
+  and 293 NUTS-2 regions, 2000–2026; ~290k rows including full revision history)
+  in a single DuckDB fact table with revision lineage and per-record source.
 - **Events** — 43 curated, dated European events (memberships, crises, policy
   milestones) with primary-source URLs, for event studies.
 - **Graph** — countries, indicators, sources and blocs as a NetworkX-ready
@@ -101,7 +101,7 @@ Unknown names raise `ed.EuroDataLookupError` with did-you-mean suggestions.
 | Source | Used for | License |
 |--------|----------|---------|
 | **Eurostat** (JSON API) | Median age, HICP inflation (annual + monthly), quarterly GDP growth, AI adoption, ICT specialists | CC BY 4.0 |
-| **World Bank** | 22 indicator series (fallback + global coverage) | CC BY 4.0 |
+| **World Bank** | 34 indicator series (fallback + global coverage) | CC BY 4.0 |
 | **ECB** (SDMX CSV) | monthly long-term interest rates (10y), exchange rates vs EUR | ECB reuse policy (attribution) |
 | **OECD** (SDMX CSV) | monthly unemployment rate (OECD members) | OECD terms (attribution) |
 | **eurodata curated** | event layer (each event cites its primary source) | CC BY 4.0 compilation |
