@@ -108,6 +108,37 @@ export type RevisionSummaryRow = {
 };
 
 /** One revised (indicator, country, period) across the whole dataset. */
+export type HeadlineFact = {
+  indicator: string;
+  value: number;
+  unit: string | null;
+  period: string;
+  rank: number;
+  of: number;
+  median: number;
+};
+
+export type MoverFact = {
+  indicator: string;
+  change: number;
+  percentile: number;
+  unit: string | null;
+  from_year: number;
+  to_year: number;
+};
+
+export type CountryProfile = {
+  iso3: string;
+  iso2: string | null;
+  name: string;
+  blocs: { code: string; name: string; since_year: number | null; until_year: number | null }[];
+  headline: HeadlineFact[];
+  fastest_rising: MoverFact | null;
+  fastest_falling: MoverFact | null;
+  n_indicators: number;
+  last_year: number | null;
+};
+
 export type PropagationRow = {
   node: string;
   hop: number;
