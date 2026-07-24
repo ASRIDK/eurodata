@@ -833,6 +833,131 @@ class EuroData:
         return self.lagged_correlation(indicator_a, indicator_b, lag=0,
                                        min_years=min_years, on=on)
 
+    # The headline figures a country profile leads with. Kept here rather than
+    # in the frontend so rank and median are computed where the data is.
+    PROFILE_INDICATORS = ("GDP", "GDP per capita", "Population",
+                          "Unemployment Rate", "Inflation (HICP)")
+
+    def country_profile(self, country: str, *, trend_years: int = 10) -> dict:
+        """Everything a country profile summary needs, as structured facts.
+
+        Returns the country's identity, its bloc memberships with join years,
+        each headline indicator with its value *and* its rank and the European
+        median for context, and the indicators that moved most over the last
+        ``trend_years``.
+
+        Facts, not prose: ranks and deltas are computed here where the data is
+        and can be tested, and the page composes sentences from them, so the
+        wording can never drift from the numbers rendered beside it.
+
+        A rank is simply the position when every country's latest value is
+        sorted high to low -- it carries no judgement about whether high is
+        good, which varies by indicator.
+        """
+        geo_id = self._resolve_country(country)
+        row = self.query(
+            "SELECT COALESCE(iso3, code) AS iso3, iso2, name FROM geography "
+            "WHERE id = ?", [geo_id])
+        if row.empty:
+            raise EuroDataLookupError(f"Unknown country: {country!r}")
+        iso3 = str(row.iloc[0]["iso3"])
+
+        headline = []
+        for name in self.PROFILE_INDICATORS:
+            try:
+                across = self.latest(name)
+            except EuroDataLookupError:
+                continue
+            if across.empty or iso3 not in set(across["iso3"]):
+                continue
+            mine = across[across["iso3"] == iso3].iloc[0]
+            ordered = across.sort_values("value", ascending=False).reset_index(drop=True)
+            rank = int(ordered.index[ordered["iso3"] == iso3][0]) + 1
+            headline.append({
+                "indicator": name,
+                "value": float(mine["value"]),
+                "unit": None if pd.isna(mine["unit"]) else str(mine["unit"]),
+                "period": str(mine["period"]),
+                "rank": rank,
+                "of": int(len(ordered)),
+                "median": float(across["value"].median()),
+            })
+
+        # "Fastest rising/falling" is deliberately measured relative to peers,
+        # not in raw percent. A raw proportional change is dominated by
+        # rate/percentage indicators with near-zero baselines (an interest rate
+        # going 0.5 -> 3.7 reads as "+620%"), and it surfaces Europe-wide shifts
+        # that say nothing about this country. Instead: this country's decade
+        # change per indicator, ranked as a percentile against every country's
+        # decade change for the same indicator, in the indicator's own units.
+        # A high percentile means it rose more here than almost anywhere; that
+        # is the distinctive story. The interest-rate rise -- which happened
+        # everywhere -- lands mid-pack and does not win.
+        changes = self.query("""
+            WITH win AS (
+                SELECT s.geography_id, s.indicator_id, s.year, s.value,
+                       COALESCE(s.unit, i.unit) AS unit, i.name AS indicator
+                FROM statistic_best s
+                JOIN indicator i ON i.id = s.indicator_id
+                JOIN geography g ON g.id = s.geography_id
+                WHERE g.level = 'country' AND s.value IS NOT NULL
+                  AND s.year >= (SELECT MAX(year) FROM statistic_best) - ?
+            )
+            SELECT geography_id, indicator, ANY_VALUE(unit) AS unit,
+                   MIN(year) AS from_year, MAX(year) AS to_year,
+                   arg_max(value, year) - arg_min(value, year) AS change
+            FROM win GROUP BY geography_id, indicator
+            HAVING MIN(year) < MAX(year)""", [trend_years])
+
+        rising = falling = None
+        if not changes.empty:
+            # Percentile of each country's change within its indicator's
+            # cross-country distribution. Needs a few peers to mean anything.
+            counts = changes.groupby("indicator")["change"].transform("size")
+            changes = changes[counts >= 5]
+            changes = changes.assign(
+                pct=changes.groupby("indicator")["change"].rank(pct=True))
+            mine = changes[changes["geography_id"] == geo_id]
+            if not mine.empty:
+                def _fact(r):
+                    return {"indicator": str(r["indicator"]),
+                            "change": float(r["change"]),
+                            "percentile": round(float(r["pct"]) * 100.0),
+                            "unit": None if pd.isna(r["unit"]) else str(r["unit"]),
+                            "from_year": int(r["from_year"]),
+                            "to_year": int(r["to_year"])}
+                top = mine.loc[mine["pct"].idxmax()]
+                bottom = mine.loc[mine["pct"].idxmin()]
+                # Only claim "rising" if it actually rose (and fell, for
+                # falling) -- a top-percentile change can still be a decline if
+                # every country declined.
+                if top["change"] > 0:
+                    rising = _fact(top)
+                if bottom["change"] < 0:
+                    falling = _fact(bottom)
+
+        coverage = self.query(
+            "SELECT COUNT(DISTINCT indicator_id) AS n, MAX(year) AS last_year "
+            "FROM statistic_best WHERE geography_id = ?", [geo_id])
+        blocs = self.country_blocs(iso3)
+        return {
+            "iso3": iso3,
+            "iso2": None if pd.isna(row.iloc[0]["iso2"]) else str(row.iloc[0]["iso2"]),
+            "name": str(row.iloc[0]["name"]),
+            # pd.isna, not `is None`: a nullable-int column yields pd.NA for a
+            # current member (no until_year), which `is None` does not catch.
+            "blocs": [{"code": str(b["bloc_code"]), "name": str(b["bloc_name"]),
+                       "since_year": None if pd.isna(b["since_year"]) else int(b["since_year"]),
+                       "until_year": None if pd.isna(b["until_year"]) else int(b["until_year"])}
+                      for _, b in blocs.iterrows()],
+            "headline": headline,
+            "fastest_rising": rising,
+            "fastest_falling": falling,
+            "n_indicators": int(coverage.iloc[0]["n"] or 0),
+            "last_year": None if pd.isna(coverage.iloc[0]["last_year"])
+                         else int(coverage.iloc[0]["last_year"]),
+        }
+
     def country_correlations(self, country: str, *, min_years: int = 8,
                              limit: int | None = 20) -> pd.DataFrame:
         """This country's own growth-rate correlations for the indicator pairs
@@ -987,6 +1112,7 @@ revisions_summary = _delegate("revisions_summary")
 country_blocs = _delegate("country_blocs")
 country_indicators = _delegate("country_indicators")
 country_correlations = _delegate("country_correlations")
+country_profile = _delegate("country_profile")
 compare = _delegate("compare")
 forecast = _delegate("forecast")
 coverage = _delegate("coverage")
@@ -1006,7 +1132,7 @@ __all__ = [
     "countries", "blocs", "bloc_members", "domains", "indicators", "sources",
     "years", "search_indicators", "series", "latest", "provenance",
     "revisions", "revisions_summary",
-    "country_blocs", "country_indicators", "country_correlations",
+    "country_blocs", "country_indicators", "country_profile", "country_correlations",
     "compare", "forecast", "coverage",
     "ingestion_summary", "events", "event_types", "event_study",
     "correlate", "lagged_correlation", "indicator_trends", "correlation_graph",
