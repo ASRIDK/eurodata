@@ -1007,6 +1007,180 @@ class EuroData:
                  .reset_index(drop=True))
         return out.head(limit) if limit else out
 
+    # -- convergence ------------------------------------------------------
+    _CONVERGENCE_COLUMNS = ["iso3", "country", "initial_year", "initial_value",
+                            "final_year", "final_value", "annualized_growth",
+                            "log_initial"]
+
+    def convergence(self, indicator: str, *, countries: list[str] | None = None,
+                    bloc: str | None = None, start: int | None = None,
+                    end: int | None = None) -> pd.DataFrame:
+        r"""Beta- and sigma-convergence analysis for one indicator.
+
+        The canonical growth-economics test of whether lower-level units catch
+        up with higher-level ones. Intended for **positive level** indicators
+        (GDP per capita, population, …); non-positive observations are dropped
+        because the analysis works in logs.
+
+        The returned DataFrame is the **beta-convergence scatter** — one row per
+        unit with its initial and final level and its annualized log-growth (in
+        %/yr), sorted poorest-first — directly plottable as growth vs. log
+        initial level. Everything else hangs off ``df.attrs``:
+
+        - ``attrs['beta']`` — the OLS of annualized growth on ``log_initial``:
+          ``coefficient`` (%/yr per log-unit; **negative ⇒ convergence**),
+          ``intercept``, ``std_err``, ``t_stat``, ``p_value`` (two-sided, Fisher
+          z normal approximation — same method as ``correlate``), ``r_squared``,
+          ``n``, ``converging`` (coefficient < 0), and the implied ``speed``
+          (λ solving ``coefficient/100 = -(1-e^{-λT})/T`` with T the mean unit
+          span) and ``half_life`` (``ln 2 / λ``, years). Stats are ``None`` when
+          fewer than 3 units qualify.
+        - ``attrs['sigma']`` — a per-year DataFrame (``year``, ``n``, ``sd_log``
+          = cross-unit SD of ``ln(value)``, ``cv`` = coefficient of variation,
+          ``mean_log``). Falling ``sd_log`` over time is sigma-convergence.
+        - ``attrs['sigma_trend']`` — OLS of ``sd_log`` on year: ``slope``,
+          ``p_value``, ``converging`` (slope < 0), ``start_dispersion``,
+          ``end_dispersion``.
+
+        Descriptive, not causal: unconditional convergence says nothing about
+        *why* units converge (technology diffusion, cohesion transfers, mean
+        reversion). Filter the unit set with ``countries`` / ``bloc`` and the
+        window with ``start`` / ``end``.
+        """
+        frame = self._indicator_frame(indicator)  # iso3, year, value; validates name
+        if start is not None:
+            frame = frame[frame["year"] >= start]
+        if end is not None:
+            frame = frame[frame["year"] <= end]
+        frame = frame[frame["value"] > 0]  # log-based: positive levels only
+
+        allow: set[str] | None = None
+        if countries is not None:
+            allow = {self._con.execute(
+                        "SELECT COALESCE(iso3, code) FROM geography WHERE id = ?",
+                        [self._resolve_country(c)]).fetchone()[0]
+                     for c in countries}
+        if bloc is not None:
+            members = set(self.bloc_members(bloc)["iso3"])  # validates bloc
+            allow = members if allow is None else (allow & members)
+        if allow is not None:
+            frame = frame[frame["iso3"].isin(allow)]
+
+        names = self.query("SELECT COALESCE(iso3, code) AS iso3, name FROM geography")
+        name_map = dict(zip(names["iso3"], names["name"], strict=False))
+
+        rows = []
+        for iso3, grp in frame.groupby("iso3"):
+            grp = grp.sort_values("year")
+            first, last = grp.iloc[0], grp.iloc[-1]
+            span = int(last["year"]) - int(first["year"])
+            if span <= 0:  # need a start and a later end to measure growth
+                continue
+            g = (math.log(last["value"]) - math.log(first["value"])) / span
+            rows.append({
+                "iso3": iso3, "country": name_map.get(iso3, iso3),
+                "initial_year": int(first["year"]),
+                "initial_value": float(first["value"]),
+                "final_year": int(last["year"]),
+                "final_value": float(last["value"]),
+                "annualized_growth": g * 100.0,
+                "log_initial": math.log(float(first["value"])),
+            })
+        scatter = (pd.DataFrame(rows, columns=self._CONVERGENCE_COLUMNS)
+                     .sort_values("log_initial").reset_index(drop=True))
+
+        sigma = self._sigma_series(frame)
+        scatter.attrs["beta"] = self._beta_stats(scatter)
+        scatter.attrs["sigma"] = sigma
+        scatter.attrs["sigma_trend"] = self._sigma_trend(sigma)
+        scatter.attrs["indicator"] = indicator
+        scatter.attrs["start"] = start
+        scatter.attrs["end"] = end
+        return scatter
+
+    @staticmethod
+    def _beta_stats(scatter: pd.DataFrame) -> dict:
+        """OLS of annualized growth (%/yr) on log initial level + convergence
+        speed. Slope < 0 is beta-convergence."""
+        n = len(scatter)
+        out = {"coefficient": None, "intercept": None, "std_err": None,
+               "t_stat": None, "p_value": None, "r_squared": None, "n": n,
+               "speed": None, "half_life": None, "converging": None}
+        if n < 3:
+            return out
+        x = scatter["log_initial"].to_numpy(dtype=float)
+        y = scatter["annualized_growth"].to_numpy(dtype=float)
+        xbar, ybar = x.mean(), y.mean()
+        sxx = float(((x - xbar) ** 2).sum())
+        if sxx == 0:
+            return out
+        b = float(((x - xbar) * (y - ybar)).sum() / sxx)
+        a = float(ybar - b * xbar)
+        resid = y - (a + b * x)
+        ssr = float((resid ** 2).sum())
+        sst = float(((y - ybar) ** 2).sum())
+        r2 = 1.0 - ssr / sst if sst > 0 else None
+        if ssr > 0:
+            se = math.sqrt((ssr / (n - 2)) / sxx)
+            t = b / se
+        else:  # perfect fit: zero residual variance
+            se = 0.0
+            t = math.inf if b > 0 else (-math.inf if b < 0 else 0.0)
+        # slope and Pearson r share a t-test, so r's two-sided p is the slope's.
+        r = math.copysign(math.sqrt(r2), b) if r2 is not None else float("nan")
+        p, _, _ = _pearson_stats(r, n)
+        # Convergence speed λ from the decimal-scale slope: b/100 = -(1-e^{-λT})/T
+        span = float((scatter["final_year"] - scatter["initial_year"]).mean())
+        b_dec = b / 100.0
+        speed = half = None
+        if span > 0 and (1.0 + b_dec * span) > 0:
+            speed = -math.log(1.0 + b_dec * span) / span
+            if speed > 0:
+                half = math.log(2) / speed
+        out.update(coefficient=b, intercept=a, std_err=se, t_stat=t, p_value=p,
+                   r_squared=r2, speed=speed, half_life=half, converging=bool(b < 0))
+        return out
+
+    @staticmethod
+    def _sigma_series(frame: pd.DataFrame) -> pd.DataFrame:
+        """Cross-unit dispersion of ln(value) per year (sigma-convergence)."""
+        cols = ["year", "n", "sd_log", "cv", "mean_log"]
+        rows = []
+        for year, grp in frame.groupby("year"):
+            vals = grp["value"].to_numpy(dtype=float)
+            vals = vals[vals > 0]
+            if len(vals) < 2:
+                continue
+            logs = np.log(vals)
+            mean = float(vals.mean())
+            rows.append({"year": int(year), "n": int(len(vals)),
+                         "sd_log": float(logs.std(ddof=1)),
+                         "cv": float(vals.std(ddof=1) / mean) if mean else None,
+                         "mean_log": float(logs.mean())})
+        return pd.DataFrame(rows, columns=cols).sort_values("year").reset_index(drop=True)
+
+    @staticmethod
+    def _sigma_trend(sigma: pd.DataFrame) -> dict:
+        """OLS of sd_log on year. Slope < 0 is sigma-convergence."""
+        out = {"slope": None, "p_value": None, "converging": None,
+               "start_dispersion": None, "end_dispersion": None}
+        if len(sigma) < 2:
+            return out
+        x = sigma["year"].to_numpy(dtype=float)
+        y = sigma["sd_log"].to_numpy(dtype=float)
+        xbar, ybar = x.mean(), y.mean()
+        sxx = float(((x - xbar) ** 2).sum())
+        syy = float(((y - ybar) ** 2).sum())
+        if sxx == 0:
+            return out
+        slope = float(((x - xbar) * (y - ybar)).sum() / sxx)
+        r = (float(((x - xbar) * (y - ybar)).sum() / math.sqrt(sxx * syy))
+             if syy > 0 else float("nan"))
+        p, _, _ = _pearson_stats(r, len(sigma))
+        out.update(slope=slope, p_value=p, converging=bool(slope < 0),
+                   start_dispersion=float(y[0]), end_dispersion=float(y[-1]))
+        return out
+
     _PROPAGATE_COLUMNS = ["node", "hop", "activation", "via", "path", "directed"]
 
     def propagate(self, node: str, *, country: str | None = None,
@@ -1123,6 +1297,7 @@ event_study = _delegate("event_study")
 correlate = _delegate("correlate")
 lagged_correlation = _delegate("lagged_correlation")
 indicator_trends = _delegate("indicator_trends")
+convergence = _delegate("convergence")
 query = _delegate("query")
 relation = _delegate("relation")
 propagate = _delegate("propagate")
@@ -1136,5 +1311,5 @@ __all__ = [
     "compare", "forecast", "coverage",
     "ingestion_summary", "events", "event_types", "event_study",
     "correlate", "lagged_correlation", "indicator_trends", "correlation_graph",
-    "query", "relation", "propagate",
+    "convergence", "query", "relation", "propagate",
 ]
