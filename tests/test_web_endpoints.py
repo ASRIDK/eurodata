@@ -141,3 +141,67 @@ def test_country_profile_endpoint(client):
 def test_country_profile_endpoint_404s_on_unknown(client):
     r = client.get("/api/country-profile", params={"country": "Nowhere"})
     assert r.status_code == 404
+
+
+@pytest.fixture
+def conv_client(monkeypatch):
+    """A 4-country GDP-per-capita panel where lower initial levels grow faster,
+    so beta-convergence is real (n >= 3 for regression stats)."""
+    import math as _math
+    con = duckdb.connect(":memory:")
+    init_schema(con)
+    seed_all(con)
+    recs = []
+    for iso3, y0 in {"DEU": 80.0, "FRA": 40.0, "ITA": 20.0, "ESP": 10.0}.items():
+        g = 0.10 - 0.02 * _math.log(y0)
+        for year in range(2000, 2011):
+            recs.append(Record(iso3, "sdg_08_10", year, y0 * _math.exp(g * (year - 2000))))
+    load_records(con, "World Bank", recs, vintage=dt.date(2026, 1, 1))
+    monkeypatch.setattr(deps, "_shared", EuroData.from_connection(con))
+    yield TestClient(app)
+    con.close()
+
+
+def test_convergence_endpoint(conv_client):
+    r = conv_client.get("/api/convergence", params={"indicator": "GDP per capita"})
+    assert r.status_code == 200
+    body = r.json()
+    assert [row["iso3"] for row in body["rows"]] == ["ESP", "ITA", "FRA", "DEU"]
+    assert body["beta"]["coefficient"] == pytest.approx(-2.0, abs=1e-6)
+    assert body["beta"]["converging"] is True
+    assert body["beta"]["t_stat"] is None or isinstance(body["beta"]["t_stat"], (int, float))
+    assert body["sigma_trend"]["converging"] is True
+    assert len(body["sigma"]) == 11
+
+
+def test_convergence_endpoint_404s_on_unknown_indicator(conv_client):
+    r = conv_client.get("/api/convergence", params={"indicator": "Not An Indicator"})
+    assert r.status_code == 404
+
+
+def test_health_is_liveness(client):
+    r = client.get("/api/health")
+    assert r.status_code == 200 and r.json()["status"] == "ok"
+
+
+def test_ready_endpoint_reports_ready(client):
+    r = client.get("/api/ready")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ready" and body["rows"] > 0
+
+
+def test_response_time_header_present(client):
+    r = client.get("/api/countries")
+    assert "X-Response-Time-ms" in r.headers
+
+
+def test_metrics_endpoint_prometheus_format(client):
+    client.get("/api/countries")  # generate at least one observation
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain")
+    body = r.text
+    assert "eurodata_http_requests_total" in body
+    assert "eurodata_http_request_duration_seconds_count" in body
+    assert 'route="/api/countries"' in body
