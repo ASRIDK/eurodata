@@ -167,7 +167,7 @@ Pure numpy/pandas trend extrapolation — **not** prediction. Auto-selects from 
 | `/correlations` | Browse the correlation edges, filter by indicator, sort by strength |
 | `/revisions` | Browse how official statistics changed across vintages — largest revisions and most-revised indicators |
 | `/propagate` | Shock an indicator and trace the ripple across the correlation graph, hop by hop, with the path each result arrived by |
-| `/country/[iso3]` | Per-country profile: KPIs, bloc memberships, events, and the country's **own** strongest growth-rate correlations |
+| `/country/[iso3]` | Per-country profile: a data-composed summary (rank, European median, distinctive decade movers), KPIs, bloc memberships, a Europe-in-context choropleth, a NUTS 2 regional map where data exists, and events |
 | `/events` | Browse 43 events, run event-study analysis |
 | `/chat` | AI analyst with Gemini — natural language over the dataset |
 
