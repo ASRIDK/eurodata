@@ -106,20 +106,38 @@ export function Choropleth({
   };
   const xs = framePts.map((p) => px(p[0]));
   const ys = framePts.map((p) => py(p[1]));
-  const minX = pct(xs, 0.01), maxX = pct(xs, 0.99);
-  const minY = pct(ys, 0.01), maxY = pct(ys, 0.99);
-  const W = 640;
+  let minX = pct(xs, 0.01), maxX = pct(xs, 0.99);
+  let minY = pct(ys, 0.01), maxY = pct(ys, 0.99);
+  // Guarantee the focus country is fully framed. It may be a geographic outlier
+  // that the centroid trim above dropped from the frame set (Iceland, sitting far
+  // northwest, is), but a page titled "<country> in Europe" must never crop its
+  // own subject -- so widen the box to contain every point of the highlight.
+  if (highlight) {
+    const hf = geojson.features.find((f) => f.properties.id === highlight);
+    if (hf) {
+      for (const p of polygons(hf).flat()) {
+        const hx = px(p[0]), hy = py(p[1]);
+        if (hx < minX) minX = hx;
+        else if (hx > maxX) maxX = hx;
+        if (hy < minY) minY = hy;
+        else if (hy > maxY) maxY = hy;
+      }
+    }
+  }
+  const maxW = 640;
   const pad = 4;
   const spanX = maxX - minX || 1;
   const spanY = maxY - minY || 1;
-  const scale = (W - 2 * pad) / spanX;
-  // Height follows the data's own aspect ratio (capped), so there is no dead
-  // vertical space and no horizontal stretch.
-  const H = Math.min(height, spanY * scale + 2 * pad);
-  const ox = pad;
-  const oy = pad + (H - 2 * pad - spanY * scale) / 2;
-  const sx = (lng: number) => ox + (px(lng) - minX) * scale;
-  const sy = (lat: number) => oy + (py(lat) - minY) * scale;
+  // Fit the frame inside a maxW-wide, `height`-tall box, preserving aspect ratio.
+  // Scale is bounded by whichever dimension binds, so the whole frame stays
+  // visible. A width-only scale overflows and crops top *and* bottom whenever the
+  // data is taller than `height` -- and Lisbon-to-North-Cape is, in this
+  // projection -- which is what clipped Iceland and northern Scandinavia.
+  const scale = Math.min((maxW - 2 * pad) / spanX, (height - 2 * pad) / spanY);
+  const W = spanX * scale + 2 * pad;
+  const H = spanY * scale + 2 * pad;
+  const sx = (lng: number) => pad + (px(lng) - minX) * scale;
+  const sy = (lat: number) => pad + (py(lat) - minY) * scale;
 
   const vals = Object.values(values);
   const lo = vals.length ? Math.min(...vals) : 0;
@@ -147,7 +165,7 @@ export function Choropleth({
   return (
     <div>
       <svg
-        viewBox={`0 0 ${W} ${H.toFixed(0)}`}
+        viewBox={`0 0 ${W.toFixed(0)} ${H.toFixed(0)}`}
         className="h-auto w-full"
         role="img"
         aria-label={
