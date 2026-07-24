@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
+import math
+import time
 from typing import Any, Literal
 
 import pandas as pd
@@ -23,10 +26,35 @@ from pydantic import BaseModel
 from eurodata import EuroDataLookupError
 from web.backend import deps
 from web.backend.chat import ChatNotConfiguredError, run_chat
+from web.backend.observability import METRICS, access_logger
 from web.backend.ratelimit import from_env as _rate_limiter_from_env
 from web.backend.tools import _clean, df_records
 
 app = FastAPI(title="eurodata API", version="0.1.0")
+
+
+@app.middleware("http")
+async def _observe(request: Request, call_next):
+    """Structured access log + Prometheus metrics for every request, labelled by
+    the matched route template so metric cardinality stays bounded."""
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        dur = time.perf_counter() - start
+        route = getattr(request.scope.get("route"), "path", request.url.path)
+        METRICS.observe(request.method, route, 500, dur)
+        access_logger.info(json.dumps({"method": request.method, "route": route,
+                                       "status": 500, "duration_ms": round(dur * 1000, 2)}))
+        raise
+    dur = time.perf_counter() - start
+    route = getattr(request.scope.get("route"), "path", request.url.path)
+    METRICS.observe(request.method, route, response.status_code, dur)
+    access_logger.info(json.dumps({"method": request.method, "route": route,
+                                   "status": response.status_code,
+                                   "duration_ms": round(dur * 1000, 2)}))
+    response.headers["X-Response-Time-ms"] = f"{dur * 1000:.1f}"
+    return response
 
 app.add_middleware(
     CORSMiddleware,
@@ -49,6 +77,17 @@ def _query(method: str, /, **kwargs) -> Any:
     return getattr(deps.get_ed(), method)(**kwargs)
 
 
+def _json_dict(d: dict | None) -> dict:
+    """JSON-safe a flat dict of scalars: reuse `_clean` and drop non-finite
+    floats (e.g. a perfect-fit t-stat of +/-inf) to None so the payload stays
+    valid JSON."""
+    out = {}
+    for k, v in (d or {}).items():
+        v = _clean(v)
+        out[k] = None if isinstance(v, float) and not math.isfinite(v) else v
+    return out
+
+
 def _latest_vintage() -> str:
     """Max vintage date in the dataset; the cache key for static-ish endpoints."""
     row = deps.get_ed().query(
@@ -68,8 +107,34 @@ def _cached(request: Request, name: str, build) -> Response:
 
 @app.get("/api/health")
 def health() -> dict:
+    """Liveness: the process is up and can answer. Cheap, no readiness claim."""
     lo, hi = _query("years")
     return {"status": "ok", "years": [lo, hi]}
+
+
+@app.get("/api/ready")
+def ready() -> Response:
+    """Readiness: the database is reachable and populated. Returns 503 when the
+    DB can't be queried, so a load balancer / k8s probe can route around a bad
+    instance instead of sending it traffic."""
+    try:
+        n = int(deps.get_ed().query(
+            "SELECT COUNT(*) AS n FROM statistic_record").iloc[0]["n"])
+    except Exception as exc:  # noqa: BLE001 — surface any DB failure as not-ready
+        return JSONResponse(status_code=503,
+                            content={"status": "not_ready", "detail": str(exc)})
+    if n == 0:
+        return JSONResponse(status_code=503,
+                            content={"status": "not_ready", "detail": "no data loaded"})
+    return JSONResponse(content={"status": "ready", "rows": n,
+                                 "latest_vintage": _latest_vintage()})
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    """Prometheus metrics: request counts and per-route latency (text format)."""
+    return Response(content=METRICS.render(),
+                    media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 @app.get("/api/countries")
@@ -230,6 +295,29 @@ def correlate(a: str, b: str, lag: int = 0, min_years: int = 10,
     return {"rows": df_records(df), "basis": on}
 
 
+@app.get("/api/convergence")
+def convergence(indicator: str, countries: str | None = None,
+                bloc: str | None = None, start: int | None = None,
+                end: int | None = None) -> dict:
+    """Beta- and sigma-convergence for one indicator across countries/regions.
+
+    `countries` is an optional comma-separated list; `bloc` restricts to a
+    bloc's members. Returns the beta-convergence scatter (`rows`) with its
+    regression (`beta`), and the sigma dispersion series (`sigma`) with its
+    trend (`sigma_trend`). Descriptive, not causal. Unknown indicator/bloc ->
+    404 via the EuroDataLookupError handler.
+    """
+    country_list = [c.strip() for c in countries.split(",") if c.strip()] if countries else None
+    df = _query("convergence", indicator=indicator, countries=country_list,
+                bloc=bloc, start=start, end=end)
+    return {
+        "rows": df_records(df),
+        "beta": _json_dict(df.attrs.get("beta")),
+        "sigma": df_records(df.attrs.get("sigma")),
+        "sigma_trend": _json_dict(df.attrs.get("sigma_trend")),
+    }
+
+
 @app.get("/api/revisions")
 def revisions(indicator: str, country: str) -> dict:
     df = _query("revisions", indicator=indicator, country=country)
@@ -249,6 +337,29 @@ def revisions_summary(country: str | None = None, indicator: str | None = None) 
 @app.get("/api/country-correlations")
 def country_correlations(country: str, limit: int = 20) -> dict:
     df = _query("country_correlations", country=country, limit=limit)
+    return {"rows": df_records(df)}
+
+
+@app.get("/api/country-profile")
+def country_profile(country: str) -> dict:
+    """Structured facts a country profile summarizes: identity, blocs, headline
+    indicators with rank and European median, and its most distinctive decade
+    movers. Unknown country -> 404 via the EuroDataLookupError handler."""
+    return _query("country_profile", country=country)
+
+
+@app.get("/api/propagate")
+def propagate(node: str, country: str | None = None, shock: float = 1.0,
+              max_hops: int = 3, decay: float = 0.6, threshold: float = 0.05,
+              edge_floor: float = 0.30) -> dict:
+    """Ripple of a shock to `node` across the correlation graph.
+
+    Associative, not causal: `directed` is True only where every edge on the
+    path carries a Granger-confirmed direction.
+    """
+    df = _query("propagate", node=node, country=country, shock=shock,
+                max_hops=max_hops, decay=decay, threshold=threshold,
+                edge_floor=edge_floor)
     return {"rows": df_records(df)}
 
 

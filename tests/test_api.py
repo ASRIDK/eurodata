@@ -468,3 +468,138 @@ def test_correlation_graph_is_empty_until_the_graph_is_built(db):
     assert edges.empty
     for col in ("indicator_a", "indicator_b", "weight"):
         assert col in edges.columns
+
+
+# --- propagation ------------------------------------------------------------
+
+def _seed_edges(db, rows):
+    """Insert CORRELATES_WITH edges directly, so propagation can be tested
+    without running the full graph builder.
+
+    graph_node.id is an INTEGER PRIMARY KEY with no sequence default, so ids
+    must be assigned explicitly — the same thing scripts/build_graph.py does
+    with its counter. correlation_graph() parses props as JSON and reads
+    relationship/direction/q_value/n_countries, so all four must be present.
+    """
+    def node_id(name):
+        ind_id = db.con.execute(
+            "SELECT id FROM indicator WHERE name = ?", [name]).fetchone()[0]
+        existing = db.con.execute(
+            "SELECT id FROM graph_node WHERE node_type='indicator' AND ref_id = ?",
+            [ind_id]).fetchone()
+        if existing:
+            return existing[0]
+        nid = db.con.execute(
+            "SELECT COALESCE(MAX(id), 0) + 1 FROM graph_node").fetchone()[0]
+        db.con.execute(
+            "INSERT INTO graph_node (id, node_type, ref_id, label) "
+            "VALUES (?, 'indicator', ?, ?)", [nid, ind_id, name])
+        return nid
+
+    for a, b, weight, direction in rows:
+        props = ('{"direction": "%s", "q_value": 0.01, '
+                 '"relationship": "contemporaneous", "n_countries": 5}' % direction)
+        db.con.execute(
+            "INSERT INTO graph_edge (src_node_id, dst_node_id, edge_type, weight, props) "
+            "VALUES (?, ?, 'CORRELATES_WITH', ?, ?)",
+            [node_id(a), node_id(b), weight, props])
+
+
+def test_propagate_ripples_across_indicators(db):
+    _seed_edges(db, [
+        ("Unemployment Rate", "Government Debt (% GDP)", 0.6, "undetermined"),
+        ("Government Debt (% GDP)", "R&D Expenditure (% GDP)", -0.6, "undetermined"),
+    ])
+    out = db.propagate("Unemployment Rate", edge_floor=0.3, threshold=0.05)
+    rows = {r["node"]: r for _, r in out.iterrows()}
+    assert set(rows) == {"Government Debt (% GDP)", "R&D Expenditure (% GDP)"}
+    assert rows["Government Debt (% GDP)"]["hop"] == 1
+    assert rows["Government Debt (% GDP)"]["activation"] > 0
+    # positive shock -> debt up -> R&D down, two hops out
+    assert rows["R&D Expenditure (% GDP)"]["hop"] == 2
+    assert rows["R&D Expenditure (% GDP)"]["activation"] < 0
+    assert rows["R&D Expenditure (% GDP)"]["via"] == "Government Debt (% GDP)"
+    assert list(out.columns) == ["node", "hop", "activation", "via", "path", "directed"]
+
+
+def test_propagate_rejects_an_unknown_node(db):
+    with pytest.raises(EuroDataLookupError):
+        db.propagate("Unemploymnet Rate")
+
+
+def test_propagate_returns_empty_frame_when_the_graph_is_unbuilt(db):
+    out = db.propagate("GDP")
+    assert out.empty
+    assert list(out.columns) == ["node", "hop", "activation", "via", "path", "directed"]
+
+
+def test_propagate_accepts_an_indicator_api_code(db):
+    _seed_edges(db, [("Unemployment Rate", "Government Debt (% GDP)", 0.6,
+                      "undetermined")])
+    # une_rt_a is Unemployment Rate's api_code; _resolve_indicator accepts either
+    out = db.propagate("une_rt_a", edge_floor=0.3)
+    assert "Government Debt (% GDP)" in set(out["node"])
+
+
+def test_propagate_walks_this_countrys_own_correlations(db):
+    # The country branch reads country_correlations, which names its weight
+    # column `correlation` and carries no `direction` column at all -- every
+    # per-country edge is therefore symmetric, so nothing can come back
+    # directed. ITA has 9 overlapping years of these two series in the fixture,
+    # which clears country_correlations' 8-year minimum; with fewer, that call
+    # returns nothing and this test would pass while asserting nothing.
+    _seed_edges(db, [("R&D Expenditure (% GDP)", "GDP per capita", 0.9,
+                      "undetermined")])
+    out = db.propagate("R&D Expenditure (% GDP)", country="ITA", edge_floor=0.3)
+    assert list(out["node"]) == ["GDP per capita"]
+    assert out.iloc[0]["hop"] == 1
+    assert out.iloc[0]["activation"] > 0
+    assert bool(out.iloc[0]["directed"]) is False
+    assert list(out.columns) == ["node", "hop", "activation", "via", "path", "directed"]
+
+
+# --- country_profile --------------------------------------------------------
+
+def test_country_profile_identity_and_blocs(db):
+    p = db.country_profile("FRA")
+    assert p["iso3"] == "FRA" and p["name"] == "France"
+    codes = {b["code"] for b in p["blocs"]}
+    assert {"EU", "EUROZONE"} <= codes
+    eu = next(b for b in p["blocs"] if b["code"] == "EU")
+    assert eu["since_year"] == 1958 and eu["until_year"] is None
+
+
+def test_country_profile_headline_carries_rank_and_median(db):
+    # The fixture seeds GDP for DEU (rising to 200) and FRA (rising to 90+),
+    # so DEU outranks FRA and both share a median.
+    p = db.country_profile("DEU")
+    gdp = next(h for h in p["headline"] if h["indicator"] == "GDP")
+    assert gdp["rank"] == 1
+    assert gdp["of"] == 2                       # only DEU and FRA have GDP here
+    # DEU 100+10*10=200, FRA 90+8*10=170 at 2020 (i runs 0..10)
+    assert gdp["median"] == pytest.approx((200.0 + 170.0) / 2)
+    assert gdp["value"] == 200.0
+
+
+def test_country_profile_omits_indicators_without_data(db):
+    # Iceland has no rows in this fixture, so nothing headline appears, but the
+    # call still succeeds and returns the documented shape.
+    p = db.country_profile("ISL")
+    assert p["headline"] == []
+    assert p["fastest_rising"] is None and p["fastest_falling"] is None
+    assert set(p) == {"iso3", "iso2", "name", "blocs", "headline",
+                      "fastest_rising", "fastest_falling", "n_indicators", "last_year"}
+
+
+def test_country_profile_rejects_unknown_country(db):
+    with pytest.raises(EuroDataLookupError):
+        db.country_profile("Notacountry")
+
+
+def test_country_profile_fastest_needs_five_peers(db):
+    # The fixture has at most two countries per indicator, below the 5-peer
+    # floor the percentile ranking requires, so no distinctive mover is claimed
+    # rather than one computed from a two-country distribution.
+    p = db.country_profile("DEU")
+    assert p["fastest_rising"] is None
+    assert p["fastest_falling"] is None
