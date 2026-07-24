@@ -556,3 +556,50 @@ def test_propagate_walks_this_countrys_own_correlations(db):
     assert out.iloc[0]["activation"] > 0
     assert bool(out.iloc[0]["directed"]) is False
     assert list(out.columns) == ["node", "hop", "activation", "via", "path", "directed"]
+
+
+# --- country_profile --------------------------------------------------------
+
+def test_country_profile_identity_and_blocs(db):
+    p = db.country_profile("FRA")
+    assert p["iso3"] == "FRA" and p["name"] == "France"
+    codes = {b["code"] for b in p["blocs"]}
+    assert {"EU", "EUROZONE"} <= codes
+    eu = next(b for b in p["blocs"] if b["code"] == "EU")
+    assert eu["since_year"] == 1958 and eu["until_year"] is None
+
+
+def test_country_profile_headline_carries_rank_and_median(db):
+    # The fixture seeds GDP for DEU (rising to 200) and FRA (rising to 90+),
+    # so DEU outranks FRA and both share a median.
+    p = db.country_profile("DEU")
+    gdp = next(h for h in p["headline"] if h["indicator"] == "GDP")
+    assert gdp["rank"] == 1
+    assert gdp["of"] == 2                       # only DEU and FRA have GDP here
+    # DEU 100+10*10=200, FRA 90+8*10=170 at 2020 (i runs 0..10)
+    assert gdp["median"] == pytest.approx((200.0 + 170.0) / 2)
+    assert gdp["value"] == 200.0
+
+
+def test_country_profile_omits_indicators_without_data(db):
+    # Iceland has no rows in this fixture, so nothing headline appears, but the
+    # call still succeeds and returns the documented shape.
+    p = db.country_profile("ISL")
+    assert p["headline"] == []
+    assert p["fastest_rising"] is None and p["fastest_falling"] is None
+    assert set(p) == {"iso3", "iso2", "name", "blocs", "headline",
+                      "fastest_rising", "fastest_falling", "n_indicators", "last_year"}
+
+
+def test_country_profile_rejects_unknown_country(db):
+    with pytest.raises(EuroDataLookupError):
+        db.country_profile("Notacountry")
+
+
+def test_country_profile_fastest_needs_five_peers(db):
+    # The fixture has at most two countries per indicator, below the 5-peer
+    # floor the percentile ranking requires, so no distinctive mover is claimed
+    # rather than one computed from a two-country distribution.
+    p = db.country_profile("DEU")
+    assert p["fastest_rising"] is None
+    assert p["fastest_falling"] is None

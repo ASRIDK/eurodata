@@ -128,3 +128,16 @@ def test_propagate_endpoint_passes_through_tuning_parameters(client):
     assert r.status_code == 200
     for row in r.json()["rows"]:
         assert row["hop"] == 1
+
+
+def test_country_profile_endpoint(client):
+    r = client.get("/api/country-profile", params={"country": "FRA"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["iso3"] == "FRA"
+    assert "headline" in body and "blocs" in body
+
+
+def test_country_profile_endpoint_404s_on_unknown(client):
+    r = client.get("/api/country-profile", params={"country": "Nowhere"})
+    assert r.status_code == 404
