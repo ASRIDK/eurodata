@@ -6,6 +6,7 @@ graph build, quality gate, gating behaviour — without any external calls.
 """
 import datetime as dt
 import os
+import sys
 import tempfile
 
 # Isolate Prefect's local state before it is imported.
@@ -69,3 +70,32 @@ def test_quality_gate_blocks_the_flow(tmp_path, monkeypatch):
     # raises -> the flow fails.
     with pytest.raises(DataQualityError):
         flow_mod.ingestion_flow(db_path=db_path, do_release=False, min_rows=10_000_000)
+
+
+def test_flow_ingests_every_registered_source(tmp_path, monkeypatch):
+    """Regression: the flow must see the source registry populated.
+
+    ``all_sources()`` reads a registry that is only filled when the source
+    modules are imported. The flow used to import them inside the per-source
+    task only, so at flow level the registry was empty, zero ingest tasks ran,
+    and the row-count gate then failed every scheduled CI refresh.
+    """
+    db_path = str(tmp_path / "flow3.duckdb")
+    _seed_db(db_path)
+    # Start from an empty registry, as a fresh CI process does: forget any
+    # source module another test already imported so re-importing re-registers.
+    from eurodata.sources import registry
+    for name in flow_mod._SOURCE_MODULES:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    monkeypatch.setattr(registry, "_REGISTRY", {})
+    monkeypatch.setattr(flow_mod, "all_sources", registry.all_sources)
+    # No network: stub the fetch+load step and record which sources were run.
+    seen: list[str] = []
+    def fake_run_source(con, source_name, start_year):
+        seen.append(source_name)
+        return 0
+    monkeypatch.setattr(flow_mod, "run_source", fake_run_source)
+
+    flow_mod.ingestion_flow(db_path=db_path, do_release=False, min_rows=10)
+
+    assert sorted(seen) == ["ECB", "Eurostat", "OECD", "World Bank"]

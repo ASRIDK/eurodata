@@ -115,6 +115,10 @@ def ingestion_flow(db_path: str | None = None, start_year: int | None = None,
     db_path = db_path or settings.duckdb_path
     start_year = start_year if start_year is not None else settings.ingest_start_year
 
+    # The registry is only populated by importing the source modules; do it
+    # here (not just inside the task) or all_sources() is empty in a fresh
+    # process and the flow silently ingests nothing.
+    _register_sources()
     counts: dict[str, int] = {}
     for source_name in all_sources():
         counts[source_name] = ingest_source(db_path, source_name, start_year)
