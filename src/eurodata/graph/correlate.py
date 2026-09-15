@@ -39,15 +39,18 @@ Needs the `app` extra (`pip install -e ".[app]"`): statsmodels + scipy.
 """
 from __future__ import annotations
 
+import inspect
 import warnings
 from dataclasses import dataclass, field
 from itertools import combinations
 from math import atanh, erf, sqrt, tanh
 
 import duckdb
+import numpy as np
 import pandas as pd
 from scipy.stats import combine_pvalues
 from statsmodels.stats.multitest import multipletests
+from statsmodels.tools.sm_exceptions import InfeasibleTestError
 from statsmodels.tsa.stattools import grangercausalitytests
 
 # Minimum overlapping (country, year) growth-rate points for a country to
@@ -58,6 +61,12 @@ MIN_YEARS = 8
 MIN_COUNTRIES = 3
 # Annual series are short; keep the Granger VAR tiny so it stays estimable.
 MAX_GRANGER_LAG = 1
+# statsmodels < 0.15 prints the full Granger report unless verbose=False;
+# 0.15 dropped the kwarg (and is silent). Pass it only where it exists.
+_GRANGER_KWARGS = (
+    {"verbose": False}
+    if "verbose" in inspect.signature(grangercausalitytests).parameters else {}
+)
 # Benjamini-Hochberg FDR threshold across all indicator pairs tested.
 FDR_ALPHA = 0.05
 # Threshold on the *combined* (cross-country) Granger p-value before a
@@ -151,9 +160,11 @@ def _granger_p(y: pd.Series, x: pd.Series) -> float | None:
             # near-singular regression; statsmodels warns loudly (and
             # returns NaN, handled below) rather than raising.
             warnings.simplefilter("ignore")
-            result = grangercausalitytests(data, maxlag=MAX_GRANGER_LAG, verbose=False)
+            result = grangercausalitytests(data, maxlag=MAX_GRANGER_LAG, **_GRANGER_KWARGS)
         p = float(result[MAX_GRANGER_LAG][0]["ssr_ftest"][1])
-    except Exception:
+    except (InfeasibleTestError, ValueError, np.linalg.LinAlgError, ZeroDivisionError):
+        # Only numerical failures mean "no usable test". Anything else (an
+        # API change, a bug) must surface, not read as "undetermined".
         return None
     return None if p != p else p  # NaN != NaN
 
