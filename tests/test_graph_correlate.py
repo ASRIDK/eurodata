@@ -3,6 +3,7 @@ import json
 import random
 
 import duckdb
+import pandas as pd
 
 from eurodata.api import EuroData
 from eurodata.db import init_schema
@@ -149,3 +150,24 @@ def test_correlation_graph_api():
 
     unrelated = db.correlation_graph(indicator="Unemployment Rate")
     assert unrelated.empty
+
+
+def test_granger_p_does_not_swallow_api_errors(monkeypatch):
+    """Regression: a broken statsmodels call must raise, not read as "no direction".
+
+    statsmodels 0.15 removed the deprecated ``verbose`` kwarg from
+    ``grangercausalitytests``. The resulting TypeError was caught by a bare
+    ``except Exception`` and returned as ``None``, which silently turned every
+    edge's direction into "undetermined" on a fresh install.
+    """
+    import pytest
+    from eurodata.graph import correlate
+
+    def broken(*args, **kwargs):
+        raise TypeError("grangercausalitytests() got an unexpected keyword argument 'verbose'")
+
+    monkeypatch.setattr(correlate, "grangercausalitytests", broken)
+    y = pd.Series([float(i % 3) for i in range(12)])
+    x = pd.Series([float((i + 1) % 4) for i in range(12)])
+    with pytest.raises(TypeError):
+        correlate._granger_p(y, x)
