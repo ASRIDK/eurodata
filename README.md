@@ -115,6 +115,8 @@ coverage), Government Debt (central vs general government).
 See [docs/data-dictionary.md](docs/data-dictionary.md),
 [docs/events.md](docs/events.md) and
 [docs/contributing-sources.md](docs/contributing-sources.md).
+The `CORRELATES_WITH` graph edges are explained in
+[docs/correlation-methodology.md](docs/correlation-methodology.md).
 
 ## Reproducibility
 
